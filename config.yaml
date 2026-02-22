@@ -1,0 +1,59 @@
+# BFCL Function Caller
+# Encodes arbitrary function definitions into HDC vectors and routes
+# natural language queries to the correct function via cosine similarity.
+# Designed for the Berkeley Function Calling Leaderboard (BFCL).
+
+name: bfcl-function-caller
+version: 0.1.0
+description: |
+  General-purpose function calling model for the BFCL benchmark.
+  Unlike the SaaS tool router (which uses domain-specific exemplars),
+  this model dynamically encodes any function definition provided at
+  query time into HDC vectors. It extracts action verbs, parameter
+  names, type signatures, and description keywords from JSON Schema
+  function definitions, then matches user queries against them.
+
+author: Glyphh AI
+license: MIT
+
+encoder:
+  dimensions: 10000
+  seed: 42
+
+roles:
+  action:
+    type: categorical
+    values:
+      - get
+      - set
+      - create
+      - update
+      - delete
+      - find
+      - search
+      - list
+      - calculate
+      - convert
+      - check
+      - validate
+      - send
+      - add
+      - remove
+      - none
+
+  function_name:
+    type: text
+
+  description:
+    type: text
+
+  parameters:
+    type: text
+
+  return_type:
+    type: text
+    optional: true
+
+similarity:
+  threshold: 0.45
+  top_k: 3
