@@ -1,20 +1,16 @@
 """
 Encoder for the BFCL Function Caller model.
 
-Unlike the SaaS tool router (which has fixed domain exemplars), this encoder
-dynamically builds HDC vectors from arbitrary JSON Schema function definitions
-provided at query time — exactly what BFCL requires.
-
-Flow:
-  1. Parse BFCL function definitions → extract action, name, description, params
-  2. Encode each function as an HDC glyph
-  3. Encode the user query as an HDC glyph
-  4. Cosine similarity match → return top function(s)
+Uses native Glyphh HDC encoding with:
+- text_encoding="bag_of_words" on text roles (SDK-native, no manual bundling)
+- include_temporal=False (no temporal signal pollution)
+- apply_weights_during_encoding=False (weights applied at scoring time)
+- Lexicons for categorical action role
 
 Exports:
   ENCODER_CONFIG — EncoderConfig for the BFCL model
   encode_function(func_def) — JSON Schema function → Concept dict
-  encode_query(query, func_defs) — NL query → Concept dict (context-aware)
+  encode_query(query) — NL query → Concept dict
 """
 
 import re
@@ -27,10 +23,12 @@ from glyphh.core.config import EncoderConfig, Layer, Role, Segment
 ENCODER_CONFIG = EncoderConfig(
     dimension=10000,
     seed=42,
+    apply_weights_during_encoding=False,
+    include_temporal=False,
     layers=[
         Layer(
             name="signature",
-            similarity_weight=0.6,
+            similarity_weight=0.55,
             segments=[
                 Segment(
                     name="identity",
@@ -56,7 +54,7 @@ ENCODER_CONFIG = EncoderConfig(
                         Role(
                             name="function_name",
                             similarity_weight=0.9,
-                            lexicons=[],  # dynamic — populated from func names
+                            text_encoding="bag_of_words",
                         ),
                     ],
                 ),
@@ -64,7 +62,7 @@ ENCODER_CONFIG = EncoderConfig(
         ),
         Layer(
             name="semantics",
-            similarity_weight=0.4,
+            similarity_weight=0.45,
             segments=[
                 Segment(
                     name="context",
@@ -72,12 +70,12 @@ ENCODER_CONFIG = EncoderConfig(
                         Role(
                             name="description",
                             similarity_weight=0.8,
-                            lexicons=[],  # dynamic — populated from descriptions
+                            text_encoding="bag_of_words",
                         ),
                         Role(
                             name="parameters",
                             similarity_weight=0.6,
-                            lexicons=[],  # dynamic — populated from param names
+                            text_encoding="bag_of_words",
                         ),
                     ],
                 ),
@@ -98,8 +96,10 @@ _STOP_WORDS = {
     "how", "what", "when", "where", "which", "who", "also",
     "then", "but", "just", "them", "their", "its", "be", "been",
     "have", "has", "had", "not", "dont", "want", "think",
-    "use", "call", "run", "execute", "tool", "function", "api",
     "given", "using", "by", "if", "so", "as", "at", "into",
+    "are", "was", "were", "will", "would", "could", "should",
+    "may", "might", "shall", "need", "does", "did", "am",
+    "you", "your", "he", "she", "they", "us", "his", "her",
 }
 
 _ACTION_MAP = {
@@ -114,7 +114,7 @@ _ACTION_MAP = {
     "set": "set", "assign": "set", "configure": "set",
     "delete": "delete", "remove": "remove", "drop": "delete", "erase": "delete",
     "clear": "delete", "destroy": "delete",
-    "list": "list", "enumerate": "list", "show": "list",
+    "list": "list", "enumerate": "list",
     "calculate": "calculate", "compute": "calculate", "evaluate": "calculate",
     "determine": "calculate", "measure": "calculate", "estimate": "calculate",
     "convert": "convert", "transform": "convert", "translate": "convert",
@@ -150,37 +150,45 @@ def _extract_action(text: str) -> str:
 
 def _split_camel_snake(name: str) -> str:
     """Split camelCase and snake_case into space-separated words."""
-    # snake_case → spaces
-    name = name.replace("_", " ").replace("-", " ")
-    # camelCase → spaces
+    name = name.replace("_", " ").replace("-", " ").replace(".", " ")
     name = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
     return name.lower().strip()
 
 
-def _extract_keywords(text: str) -> str:
-    """Extract meaningful keywords from text, removing stop words."""
+def _tokenize(text: str) -> list[str]:
+    """Tokenize text into meaningful words, removing stop words and short tokens."""
     cleaned = re.sub(r"[^a-z0-9\s]", "", text.lower())
-    words = [w for w in cleaned.split() if w not in _STOP_WORDS and len(w) > 1]
-    return " ".join(words)
+    return [w for w in cleaned.split() if w not in _STOP_WORDS and len(w) > 1]
 
 
-def _extract_param_names(func_def: dict) -> str:
-    """Extract parameter names from a BFCL function definition."""
+def _extract_param_tokens(func_def: dict) -> list[str]:
+    """Extract parameter tokens from a BFCL function definition."""
     params = func_def.get("parameters", {})
+    tokens = []
     if isinstance(params, dict):
         props = params.get("properties", {})
         if props:
-            names = []
             for pname, pdef in props.items():
-                names.append(_split_camel_snake(pname))
-                # Also grab enum values as keywords
+                tokens.extend(_split_camel_snake(pname).split())
                 if "enum" in pdef:
-                    names.extend(str(v).lower() for v in pdef["enum"][:5])
-                # Grab description keywords
+                    for v in pdef["enum"][:8]:
+                        tokens.extend(_tokenize(str(v)))
                 if "description" in pdef:
-                    names.append(_extract_keywords(pdef["description"]))
-            return " ".join(names)
-    return ""
+                    tokens.extend(_tokenize(pdef["description"]))
+                ptype = pdef.get("type", "")
+                if ptype and ptype not in ("object", "dict", "string", "str"):
+                    tokens.append(ptype)
+    return [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
+
+
+def _bow_value(words: list[str]) -> str:
+    """Create a bag-of-words value string for a role attribute.
+
+    The SDK's text_encoding="bag_of_words" will split this into words
+    and bundle their symbol vectors.
+    """
+    unique = list(dict.fromkeys(words))  # dedupe preserving order
+    return " ".join(unique) if unique else "none"
 
 
 # ---------------------------------------------------------------------------
@@ -190,39 +198,35 @@ def _extract_param_names(func_def: dict) -> str:
 def encode_function(func_def: dict) -> dict:
     """Convert a BFCL function definition into a Concept-compatible dict.
 
-    BFCL function defs look like:
-    {
-        "name": "calculate_triangle_area",
-        "description": "Calculate the area of a triangle given its base and height.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "base": {"type": "number", "description": "The base of the triangle."},
-                "height": {"type": "number", "description": "The height of the triangle."}
-            },
-            "required": ["base", "height"]
-        }
-    }
+    Returns a dict with 'name' and 'attributes' suitable for Concept().
+    Text role values are space-separated keyword tokens — the SDK's
+    text_encoding="bag_of_words" handles the actual encoding.
     """
     name = func_def.get("name", "unknown")
     description = func_def.get("description", "")
     name_words = _split_camel_snake(name)
 
-    # Extract action from function name first, then description
+    # Action: from function name first, then description
     action = _extract_action(name_words)
     if action == "none":
         action = _extract_action(description)
 
-    desc_keywords = _extract_keywords(description)
-    param_keywords = _extract_param_names(func_def)
+    # Function name tokens
+    name_tokens = _tokenize(name_words)
+
+    # Description tokens
+    desc_tokens = _tokenize(description)
+
+    # Parameter tokens
+    param_tokens = _extract_param_tokens(func_def)
 
     return {
         "name": f"func_{name}",
         "attributes": {
             "action": action,
-            "function_name": name_words,
-            "description": desc_keywords,
-            "parameters": param_keywords,
+            "function_name": _bow_value(name_tokens),
+            "description": _bow_value(desc_tokens),
+            "parameters": _bow_value(param_tokens),
         },
     }
 
@@ -231,26 +235,22 @@ def encode_function(func_def: dict) -> dict:
 # encode_query — NL query → Concept dict
 # ---------------------------------------------------------------------------
 
-def encode_query(query: str, func_defs: list[dict] | None = None) -> dict:
-    """Convert a user query into a Concept-compatible dict for function matching.
+def encode_query(query: str) -> dict:
+    """Convert a user query into a Concept-compatible dict.
 
-    Args:
-        query: The natural language query from the user.
-        func_defs: Optional list of function definitions for context
-                   (not used in encoding, but available for future use).
+    All text roles get the same keyword tokens from the query so they
+    can match against function_name, description, and parameters.
     """
-    cleaned = re.sub(r"[^a-z0-9\s]", "", query.lower())
-    words = cleaned.split()
-
     action = _extract_action(query)
-    keywords = _extract_keywords(query)
+    keywords = _tokenize(query)
+    kw_value = _bow_value(keywords)
 
     return {
         "name": "query",
         "attributes": {
             "action": action,
-            "function_name": keywords,  # query keywords match against func names
-            "description": keywords,
-            "parameters": keywords,
+            "function_name": kw_value,
+            "description": kw_value,
+            "parameters": kw_value,
         },
     }
