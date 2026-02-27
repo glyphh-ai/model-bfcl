@@ -38,7 +38,7 @@ MEMORY_CONFIG = EncoderConfig(
     layers=[
         Layer(
             name="content",
-            similarity_weight=0.70,
+            similarity_weight=0.85,
             segments=[
                 Segment(
                     name="fact",
@@ -54,7 +54,7 @@ MEMORY_CONFIG = EncoderConfig(
         ),
         Layer(
             name="context",
-            similarity_weight=0.30,
+            similarity_weight=0.15,
             segments=[
                 Segment(
                     name="meta",

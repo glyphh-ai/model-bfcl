@@ -1,60 +1,175 @@
 """
-Multi-turn BFCL handler.
+Multi-turn BFCL handler — four-model HDC architecture.
 
-Glyphh routes each turn to the right function(s).
-LLM extracts arguments from the query + function signature.
+Four Glyphh signals, no custom ML:
+  Model A  (handler.py / ENCODER_CONFIG seed=42)
+           Function router: query → per-function cosine scores via BFCL HDC encoder
+  Model B  (SEQUENCE_CONFIG seed=73, include_temporal=True)
+           Sequence predictor: history of past calls → predicted next call via
+           Glyphh temporal encoding + SDK BeamSearchPredictor
+  ConversationState (SDK, seed=73 — same space as Model B)
+           HDC pathway encoder: tracks conversation trajectory as a decaying superposition
+           of position-bound action vectors.  Pre-seeded GorillaFileSystem nav→op patterns
+           are matched via cosine similarity; active patterns boost continuation functions.
+           Hebbian reinforcement (fire → wire) strengthens patterns on correct turns.
+  IntentExtractor (SDK, seed=53 internally)
+           Filesystem intent hints: cd / touch / find signals for GorillaFileSystem turns
 
-Architecture:
-  1. Load function definitions from multi_turn_func_doc/
-  2. For each turn in a multi-turn conversation:
-     a. Glyphh encodes available functions and the user query
-     b. Glyphh scores all functions → provides ranked signal to LLM
-     c. LLM sees ALL functions but with Glyphh's relevance scores
-     d. LLM selects the exact set to call + extracts arguments
-  3. Compare against ground truth per turn
-
-Glyphh's role:
-  - Scores every function against the query (semantic routing signal)
-  - Provides confidence-ranked ordering so LLM sees most relevant first
-  - Does NOT filter — the LLM sees all functions because multi-turn
-    queries often require utility functions (cd, ls) that score low
-    semantically but are contextually necessary
+Pipeline per turn:
+  1. Model A scores all available functions against the current query
+  2. Model B (if ≥2 past calls): encodes call history, predicts next function,
+     boosts the predicted function's score in Model A's output
+  3. ConversationState: detects active pathway patterns (e.g. nav→op after a cd call),
+     boosts filesystem operation functions; IntentExtractor adds cd/touch/find signals
+  4. State tracker adds CWD / known-files / known-dirs facts for LLM context
+  5. LLM receives Glyphh-ranked functions + all signals → selects + fills args
+  6. ConversationState.update() records this turn; .confirm() on correct turns (Hebbian)
 """
 
 import json
 from pathlib import Path
 from typing import Any
 
+from glyphh import Encoder
+from glyphh.core.config import EncoderConfig, Layer, Segment, Role, TemporalConfig
+from glyphh.core.types import Concept
+from glyphh.core.ops import cosine_similarity
+from glyphh.temporal import BeamSearchPredictor
+
 from handler import GlyphhBFCLHandler
 from llm_client import get_client
-from intent_models import DirectoryIntentModel, FileCreationIntentModel, SearchIntentModel
+from glyphh.intent import IntentExtractor
+from glyphh.state import ConversationState
 from state_tracker import ConversationStateTracker
+
+# ── Model B: Sequence prediction encoder (seed=73, separate space from Model A seed=42) ──
+SEQUENCE_CONFIG = EncoderConfig(
+    dimension=10000,
+    seed=73,
+    include_temporal=True,
+    temporal_config=TemporalConfig(signal_type="sequence"),
+    layers=[
+        Layer(
+            name="function",
+            similarity_weight=1.0,
+            segments=[
+                Segment(
+                    name="call",
+                    similarity_weight=1.0,
+                    roles=[
+                        Role(name="func_name", similarity_weight=1.0),
+                    ],
+                ),
+            ],
+        ),
+    ],
+)
+
+_seq_encoder: Encoder | None = None
+_beam_predictor: BeamSearchPredictor | None = None
+
+
+def _get_seq_encoder() -> Encoder:
+    global _seq_encoder
+    if _seq_encoder is None:
+        _seq_encoder = Encoder(SEQUENCE_CONFIG)
+    return _seq_encoder
+
+
+def _get_predictor() -> BeamSearchPredictor:
+    global _beam_predictor
+    if _beam_predictor is None:
+        _beam_predictor = BeamSearchPredictor(beam_width=5, drift_reduction=True)
+    return _beam_predictor
 
 DATA_DIR = Path(__file__).parent / "data" / "bfcl"
 FUNC_DOC_DIR = DATA_DIR / "multi_turn_func_doc"
 
-# Singleton intent models — initialized once, reused across all entries
-_dir_intent_model = None
-_file_creation_model = None
-_search_intent_model = None
+# Singleton IntentExtractor with filesystem pack — initialized once, reused across all entries
+_fs_extractor: IntentExtractor | None = None
 
-def _get_dir_intent_model() -> DirectoryIntentModel:
-    global _dir_intent_model
-    if _dir_intent_model is None:
-        _dir_intent_model = DirectoryIntentModel()
-    return _dir_intent_model
 
-def _get_file_creation_model() -> FileCreationIntentModel:
-    global _file_creation_model
-    if _file_creation_model is None:
-        _file_creation_model = FileCreationIntentModel()
-    return _file_creation_model
+def _get_fs_extractor() -> IntentExtractor:
+    global _fs_extractor
+    if _fs_extractor is None:
+        _fs_extractor = IntentExtractor(packs=["filesystem"])
+    return _fs_extractor
 
-def _get_search_intent_model() -> SearchIntentModel:
-    global _search_intent_model
-    if _search_intent_model is None:
-        _search_intent_model = SearchIntentModel()
-    return _search_intent_model
+
+_CD_KEYWORDS = (
+    "navigate to", "go to", "change to", "change directory",
+    "chdir", "move to", "switch to", "enter the", "into the",
+)
+_TOUCH_ACTIONS = {"touch", "create", "make", "generate", "build", "new"}
+_TOUCH_TARGETS = {"file", "document", "script", "text", "config", "log"}
+
+# GorillaFileSystem two-step patterns [prerequisite_nav, operation] — for Hebbian reinforcement.
+# After a full cd→op sequence fires correctly, these patterns accumulate strength.
+# NOTE: 2-step patterns cannot be used for DETECTION because the partial 1-step state
+# (after only calling cd) has ~0 cosine similarity to the full 2-step pattern.
+_GFS_NAV_PATTERNS = [
+    ("nav_mv",    ["cd", "mv"]),
+    ("nav_cp",    ["cd", "cp"]),
+    ("nav_grep",  ["cd", "grep"]),
+    ("nav_cat",   ["cd", "cat"]),
+    ("nav_ls",    ["cd", "ls"]),
+    ("nav_touch", ["cd", "touch"]),
+    ("nav_mkdir", ["cd", "mkdir"]),
+    ("nav_echo",  ["cd", "echo"]),
+    ("nav_sort",  ["cd", "sort"]),
+    ("nav_find",  ["cd", "find"]),
+    ("nav_rm",    ["cd", "rm"]),
+    ("nav_wc",    ["cd", "wc"]),
+    ("nav_diff",  ["cd", "diff"]),
+]
+
+# Single-step navigation-trigger pattern for DETECTION.
+# A 1-step state perfectly matches a 1-step pattern (cosine=1.0) but is ~orthogonal
+# to any 2-step pattern — so "nav_context" fires precisely when cd was the LAST call
+# and no follow-up operation has been made yet.
+_GFS_NAV_TRIGGER = "nav_context"   # pattern name
+
+# When "nav_context" is active, these functions are likely next operations
+_GFS_OP_FUNCS = frozenset({
+    "mv", "cp", "grep", "cat", "ls", "touch", "mkdir",
+    "echo", "sort", "find", "rm", "wc", "diff", "chmod",
+})
+
+# Lookup: pattern_name → {func_name: relative_weight} for continuation boosting
+_PATHWAY_NEXT_FUNCS: dict[str, dict[str, float]] = {
+    _GFS_NAV_TRIGGER: {f: 1.0 for f in _GFS_OP_FUNCS},
+}
+
+
+def _extract_fs_hints(query: str) -> tuple[dict, dict, dict]:
+    """Extract filesystem intent hints using the SDK IntentExtractor + keyword fallbacks.
+
+    Returns (cd_hint, touch_hint, search_hint) dicts compatible with
+    the multi-turn handler's hint consumption logic.
+
+    Confidence values are set to pass/fail the thresholds in _llm_select_and_call:
+      cd_hint:     confidence >= 0.03 to inject cd / show cd signal
+      touch_hint:  confidence >= 0.09 to inject touch/echo/mkdir
+      search_hint: confidence >= 0.05 to inject find; < 0.05 to gate it out
+    """
+    result = _get_fs_extractor().extract(query)
+    action = result.get("action", "none")
+    target = result.get("target", "none")
+    ql = query.lower()
+
+    # Directory navigation: cd action OR navigation keyword phrases
+    needs_cd = action == "cd" or any(kw in ql for kw in _CD_KEYWORDS)
+    cd_hint = {"needs_cd": needs_cd, "confidence": 0.80 if needs_cd else 0.01}
+
+    # File creation: touch action, or create/make + file-like target
+    needs_touch = action == "touch" or (action in _TOUCH_ACTIONS and target in _TOUCH_TARGETS)
+    touch_hint = {"needs_touch": needs_touch, "confidence": 0.80 if needs_touch else 0.00}
+
+    # File search: find_files or search action (searching for files by name/pattern)
+    wants_find = action in ("find_files", "search")
+    search_hint = {"wants_find": wants_find, "confidence": 0.80 if wants_find else 0.01}
+
+    return cd_hint, touch_hint, search_hint
 
 # Map involved_classes names to func doc files
 CLASS_TO_FILE = {
@@ -150,6 +265,53 @@ def parse_ground_truth_step(step: list) -> list[dict]:
 
 
 
+def _predict_next_func(
+    call_history: list,
+    func_glyphs: dict,
+) -> dict[str, float]:
+    """Model B: use BeamSearchPredictor to boost scores for predicted next function.
+
+    Returns a dict of {func_name: boost_amount} where boost_amount is
+    confidence * 0.20 (max 20% score boost for the top predicted function).
+
+    Only fires when call_history has ≥ 2 entries (minimum for meaningful prediction).
+    """
+    if len(call_history) < 2 or not func_glyphs:
+        return {}
+
+    try:
+        pred_result = _get_predictor().predict(
+            history=call_history,
+            time_intervals=1,
+            hierarchy_level="cortex",
+        )
+    except Exception:
+        return {}
+
+    if not pred_result.predictions:
+        return {}
+
+    top_pred = pred_result.predictions[0]
+    if top_pred.confidence < 0.25:  # Low confidence → don't bias
+        return {}
+
+    # Find which available function glyph is most similar to the predicted vector
+    best_match: str | None = None
+    best_sim = -1.0
+    pred_vec = top_pred.vector.data  # Prediction.vector is the predicted Vector state
+
+    for fname, fglyph in func_glyphs.items():
+        sim = cosine_similarity(pred_vec, fglyph.global_cortex.data)
+        if sim > best_sim:
+            best_sim = sim
+            best_match = fname
+
+    if best_match is None or best_sim < 0.1:
+        return {}
+
+    return {best_match: top_pred.confidence * 0.20}
+
+
 def eval_multi_turn_entry(
     handler: GlyphhBFCLHandler,
     llm,
@@ -158,10 +320,13 @@ def eval_multi_turn_entry(
 ) -> dict:
     """Evaluate a single multi-turn entry.
 
-    Hybrid approach:
-    - Glyphh scores all functions and provides ranked signal
-    - LLM sees all functions with Glyphh scores, selects + extracts args
-    - If no LLM: fall back to Glyphh top-1 routing only
+    Three-model Glyphh architecture:
+    - Model A (handler.py): scores all functions per query
+    - Model B (SEQUENCE_CONFIG + BeamSearchPredictor): predicts next function
+      from past call history and boosts Model A scores
+    - IntentExtractor: filesystem intent hints (cd/touch/find)
+    - State tracker: CWD/files context for the LLM
+    - LLM: sees top-5 Glyphh-ranked functions, selects + fills args
     """
     turns = entry.get("question", [])
     available_funcs = get_available_functions(entry)
@@ -178,6 +343,33 @@ def eval_multi_turn_entry(
 
     func_defs = available_funcs
     func_map = {fdef["name"]: fdef for fdef in available_funcs}
+
+    # Pre-encode all available functions as Model B sequence glyphs (cached per entry)
+    seq_enc = _get_seq_encoder()
+    func_glyphs: dict = {
+        fdef["name"]: seq_enc.encode(Concept(
+            name=fdef["name"],
+            attributes={"func_name": fdef["name"]},
+        ))
+        for fdef in available_funcs
+    }
+    call_history: list = []  # Temporal glyph history for Model B
+
+    # Initialize ConversationState (HDC pathway tracking — seed=73 matches func_glyphs space)
+    conv_state = ConversationState(dimension=10000, seed=73, decay=0.75)
+
+    # Register 2-step patterns for Hebbian reinforcement (strengthen on correct cd→op turns)
+    for pat_name, func_seq in _GFS_NAV_PATTERNS:
+        seq_glyphs = [func_glyphs[f] for f in func_seq if f in func_glyphs]
+        if len(seq_glyphs) == len(func_seq):
+            conv_state.add_pathway(pat_name, seq_glyphs)
+
+    # Register 1-step navigation trigger for DETECTION.
+    # A 1-step [cd] pattern matches the current state with cosine=1.0 immediately after
+    # calling cd, and drops to ~0 after calling a follow-up operation — giving a clean
+    # "we are in navigation context" signal exactly when it's needed.
+    if "cd" in func_glyphs:
+        conv_state.add_pathway(_GFS_NAV_TRIGGER, [func_glyphs["cd"]])
 
     # Initialize state tracker from filesystem config
     state_tracker = ConversationStateTracker()
@@ -223,22 +415,41 @@ def eval_multi_turn_entry(
             if llm:
                 route_result = handler.route(query, func_defs)
                 all_scores = route_result.get("all_scores", [])
-                cd_hint = _get_dir_intent_model().score(query)
-                touch_hint = _get_file_creation_model().score(query)
-                search_hint = _get_search_intent_model().score(query)
+                # Apply Model B prediction boost
+                prediction_boost = _predict_next_func(call_history, func_glyphs)
+                all_scores = _apply_prediction_boost(all_scores, prediction_boost)
+                cd_hint, touch_hint, search_hint = _extract_fs_hints(query)
                 state_hint = state_tracker.get_state_hint(query)
+                active_before = conv_state.active_pathways(top_k=3)
+                all_scores = _apply_pathway_boost(all_scores, conv_state, cd_hint, touch_hint, search_hint, state_hint)
+                pathway_ctx = {
+                    "depth": conv_state.depth,
+                    "active_patterns": [n for n, s in active_before if s > 0.1],
+                }
                 predicted = _llm_select_and_call(
                     llm, query, func_defs, all_scores, conversation_context,
                     cd_hint=cd_hint, touch_hint=touch_hint, search_hint=search_hint,
-                    state_hint=state_hint,
+                    state_hint=state_hint, pathway_context=pathway_ctx,
                 )
                 predicted_funcs = set(predicted.keys()) if isinstance(predicted, dict) else set()
                 func_correct = len(predicted_funcs) == 0
                 # Update state from prediction
                 state_tracker.update_from_prediction(predicted if isinstance(predicted, dict) else {})
             else:
+                active_before = []
                 predicted_funcs = set()
                 func_correct = True
+
+            # Update Model B call history
+            _update_call_history(call_history, predicted_funcs, func_glyphs)
+
+            # Update ConversationState pathway trajectory (Hebbian: fire → wire)
+            predicted_glyph_list = [func_glyphs[f] for f in predicted_funcs if f in func_glyphs]
+            conv_state._last_active_patterns = [n for n, s in active_before if s > 0.1]
+            if predicted_glyph_list:
+                conv_state.update(predicted_glyph_list)
+            if func_correct and predicted_glyph_list:
+                conv_state.confirm(predicted_glyph_list)
 
             turn_results.append({
                 "turn": turn_idx,
@@ -257,19 +468,30 @@ def eval_multi_turn_entry(
         for call in expected_calls:
             expected_funcs.update(call.keys())
 
-        # Glyphh scores all functions
+        # Model A: Glyphh scores all functions
         route_result = handler.route(query, func_defs)
         all_scores = route_result.get("all_scores", [])
 
+        # Model B: apply beam prediction boost to Model A scores
+        prediction_boost = _predict_next_func(call_history, func_glyphs)
+        all_scores = _apply_prediction_boost(all_scores, prediction_boost)
+
+        predicted: dict = {}  # populated by whichever branch runs below
+        active_before: list = []
         if llm:
-            cd_hint = _get_dir_intent_model().score(query)
-            touch_hint = _get_file_creation_model().score(query)
-            search_hint = _get_search_intent_model().score(query)
+            cd_hint, touch_hint, search_hint = _extract_fs_hints(query)
             state_hint = state_tracker.get_state_hint(query)
+            active_before = conv_state.active_pathways(top_k=3)
+            # Apply ConversationState pathway boost: HDC-based context signal
+            all_scores = _apply_pathway_boost(all_scores, conv_state, cd_hint, touch_hint, search_hint, state_hint)
+            pathway_ctx = {
+                "depth": conv_state.depth,
+                "active_patterns": [n for n, s in active_before if s > 0.1],
+            }
             predicted = _llm_select_and_call(
                 llm, query, func_defs, all_scores, conversation_context,
                 cd_hint=cd_hint, touch_hint=touch_hint, search_hint=search_hint,
-                state_hint=state_hint,
+                state_hint=state_hint, pathway_context=pathway_ctx,
             )
             predicted_funcs = set(predicted.keys()) if isinstance(predicted, dict) else set()
             func_correct = predicted_funcs == expected_funcs
@@ -284,6 +506,7 @@ def eval_multi_turn_entry(
                 "predicted_funcs": sorted(predicted_funcs),
                 "confidence": route_result.get("confidence", 0),
                 "glyphh_top1": route_result.get("tool", "?"),
+                "beam_boost": list(prediction_boost.keys()) if prediction_boost else [],
                 "mode": "hybrid",
             })
         elif len(expected_funcs) == 1:
@@ -311,10 +534,35 @@ def eval_multi_turn_entry(
                 "mode": "glyphh_only",
             })
 
+        # Update Model B call history with this turn's predicted calls
+        _update_call_history(call_history, predicted_funcs, func_glyphs)
+
+        # Update ConversationState pathway trajectory (Hebbian: fire → wire)
+        predicted_glyph_list = [func_glyphs[f] for f in predicted_funcs if f in func_glyphs]
+        conv_state._last_active_patterns = [n for n, s in active_before if s > 0.1]
+        if predicted_glyph_list:
+            conv_state.update(predicted_glyph_list)
+        if func_correct and predicted_glyph_list:
+            conv_state.confirm(predicted_glyph_list)
+
         if turn_results[-1]["correct"]:
             correct_turns += 1
 
+        # Add user query AND assistant response to conversation context.
+        # Including the predicted function calls helps the LLM understand
+        # what state the system is in for subsequent turns.
         conversation_context.append({"role": "user", "content": query})
+        if predicted and isinstance(predicted, dict):
+            import json as _json2
+            calls_str = ", ".join(
+                f"{fname}({', '.join(f'{k}={repr(v)}' for k, v in args.items())})"
+                if args else f"{fname}()"
+                for fname, args in predicted.items()
+            )
+            conversation_context.append({
+                "role": "assistant",
+                "content": f"Called: {calls_str}",
+            })
 
     return {
         "id": entry.get("id", "?"),
@@ -324,6 +572,116 @@ def eval_multi_turn_entry(
         "correct": correct_turns == len(turn_results),
         "details": turn_results,
     }
+
+
+def _apply_prediction_boost(
+    all_scores: list[dict],
+    prediction_boost: dict[str, float],
+) -> list[dict]:
+    """Apply Model B beam prediction boost to Model A's scored list, re-sort."""
+    if not prediction_boost:
+        return all_scores
+    boosted = []
+    for entry in all_scores:
+        fname = entry["function"]
+        boost = prediction_boost.get(fname, 0.0)
+        if boost:
+            boosted.append({**entry, "score": entry["score"] + boost})
+        else:
+            boosted.append(entry)
+    boosted.sort(key=lambda x: x["score"], reverse=True)
+    return boosted
+
+
+def _apply_pathway_boost(
+    all_scores: list[dict],
+    conv_state: ConversationState,
+    cd_hint: dict | None,
+    touch_hint: dict | None,
+    search_hint: dict | None,
+    state_hint: dict | None = None,
+) -> list[dict]:
+    """Apply HDC-based pathway + intent boosts to Model A scores.
+
+    Three signal sources:
+
+    1. StateTracker structural inference — filesystem-state reasoning about whether
+       the current query references a different directory (needs cd) or a local file
+       (no cd needed).  This is structural logic about observable state, not a
+       prompt rule — the tracker knows the CWD and maps query nouns to known dirs.
+
+    2. ConversationState pathway patterns — after a cd call, the 1-step nav_context
+       pattern fires at cosine=1.0, boosting all fs operation candidates.  Drops
+       to ~0 once the follow-up operation fires (no repeat-navigation pressure).
+
+    3. IntentExtractor (SDK) — BoW-based query intent signals (cd/touch/find).
+    """
+    boosts: dict[str, float] = {}
+
+    # 1. StateTracker: structural filesystem navigation inference
+    if state_hint:
+        needs_cd = state_hint.get("needs_cd_signal", "unclear")
+        if needs_cd == "likely_yes":
+            boosts["cd"] = boosts.get("cd", 0.0) + 0.35
+        elif needs_cd == "likely_no":
+            boosts["cd"] = boosts.get("cd", 0.0) - 0.15
+
+    # 2. ConversationState: detect navigation context via 1-step trigger pattern.
+    #    A 1-step [cd] pattern matches at cosine=1.0 immediately after a cd call,
+    #    then drops to ~0 once a follow-up operation fires — giving a clean signal.
+    if conv_state.depth > 0:
+        active = conv_state.active_pathways(top_k=len(_PATHWAY_NEXT_FUNCS) + 3)
+        for pattern_name, score in active:
+            if score < 0.3:  # Only act on clear matches
+                continue
+            next_funcs = _PATHWAY_NEXT_FUNCS.get(pattern_name, {})
+            for fname, weight in next_funcs.items():
+                boosts[fname] = boosts.get(fname, 0.0) + score * weight * 0.15
+        # Penalize cd if nav trigger is strongly active (don't navigate twice)
+        nav_trigger_score = next((s for n, s in active if n == _GFS_NAV_TRIGGER), 0.0)
+        if nav_trigger_score > 0.3:
+            boosts["cd"] = boosts.get("cd", 0.0) - nav_trigger_score * 0.10
+
+    # 3. IntentExtractor: query-level navigation / creation / search intent (HDC model)
+    if cd_hint and cd_hint.get("needs_cd") and cd_hint.get("confidence", 0) >= 0.03:
+        boosts["cd"] = boosts.get("cd", 0.0) + 0.15
+    elif cd_hint and not cd_hint.get("needs_cd"):
+        boosts["cd"] = boosts.get("cd", 0.0) - 0.10
+
+    if touch_hint and touch_hint.get("needs_touch") and touch_hint.get("confidence", 0) >= 0.09:
+        boosts["touch"] = boosts.get("touch", 0.0) + 0.20
+
+    if search_hint:
+        if search_hint.get("wants_find"):
+            boosts["find"] = boosts.get("find", 0.0) + 0.20
+        else:
+            boosts["find"] = boosts.get("find", 0.0) - 0.10
+
+    if not boosts:
+        return all_scores
+
+    boosted = []
+    for entry in all_scores:
+        b = boosts.get(entry["function"], 0.0)
+        if b:
+            new_score = max(0.0, entry["score"] + b)
+            boosted.append({**entry, "score": round(new_score, 4)})
+        else:
+            boosted.append(entry)
+    boosted.sort(key=lambda x: x["score"], reverse=True)
+    return boosted
+
+
+def _update_call_history(
+    call_history: list,
+    predicted_funcs: set[str],
+    func_glyphs: dict,
+) -> None:
+    """Append this turn's predicted function glyphs to the Model B call history."""
+    for fname in sorted(predicted_funcs):  # sorted for determinism
+        glyph = func_glyphs.get(fname)
+        if glyph is not None:
+            call_history.append(glyph)
 
 
 
@@ -337,16 +695,15 @@ def _llm_select_and_call(
     touch_hint: dict | None = None,
     search_hint: dict | None = None,
     state_hint: dict | None = None,
+    pathway_context: dict | None = None,
 ) -> dict:
     """LLM selects function(s) and extracts args, guided by Glyphh's scores.
 
     Architecture:
     - Glyphh ranks all functions by semantic relevance to the query
-    - DirectoryIntentModel provides cd_hint (needs_cd, confidence)
-    - FileCreationIntentModel provides touch_hint (needs_touch, confidence)
-    - SearchIntentModel provides search_hint (wants_find, confidence)
-    - LLM sees ALL functions organized by Glyphh's ranking
-    - Top-ranked get full signatures; lower-ranked get names + description
+    - LLM receives ALL available functions, ordered by Glyphh score
+      (multi-turn scenarios have only 18-32 functions, so full list is fine)
+    - Glyphh signals (cd/touch/find hints, state) are prepended as hints
 
     Returns dict of {func_name: {args}} for each predicted call.
     """
@@ -357,32 +714,22 @@ def _llm_select_and_call(
 
     func_map = {fd["name"]: fd for fd in all_func_defs}
 
-    # Split into tiers based on Glyphh scores
-    top_score = glyphh_scores[0]["score"] if glyphh_scores else 0
-    tier1_cutoff = max(top_score * 0.50, 0.20)
+    # Order all functions by Glyphh score so the most relevant appear first
+    score_map = {s["function"]: s["score"] for s in glyphh_scores}
+    top_names: list[str] = sorted(
+        func_map.keys(),
+        key=lambda n: score_map.get(n, 0.0),
+        reverse=True,
+    )
 
-    tier1_funcs = []
-    tier2_funcs = []
-    for s in glyphh_scores:
-        if s["score"] >= tier1_cutoff:
-            tier1_funcs.append(s["function"])
-        else:
-            tier2_funcs.append(s["function"])
-
-    # Ensure at least top-8 in tier 1
-    while len(tier1_funcs) < min(8, len(glyphh_scores)):
-        if tier2_funcs:
-            tier1_funcs.append(tier2_funcs.pop(0))
-        else:
-            break
-
-    # Build tier 1: full signatures
-    tier1_blocks = []
-    for fname in tier1_funcs:
+    # Build full signatures for all selected functions
+    func_blocks = []
+    for fname in top_names:
         fdef = func_map.get(fname, {})
         desc = fdef.get("description", "")
         params = fdef.get("parameters", {}).get("properties", {})
         required = fdef.get("parameters", {}).get("required", [])
+        score = score_map.get(fname, 0.0)
 
         param_parts = []
         for pname, pdef in params.items():
@@ -391,115 +738,84 @@ def _llm_select_and_call(
             param_parts.append(f"{pname}: {ptype} ({req})")
 
         params_str = ", ".join(param_parts) if param_parts else "none"
-        tier1_blocks.append(f"  {fname}({params_str}) — {desc}")
+        # Show Glyphh score so LLM can reason about relevance; low-score functions are contextual noise
+        func_blocks.append(f"  [{score:.2f}] {fname}({params_str}) — {desc}")
 
-    # Build tier 2: names + brief description
-    tier2_blocks = []
-    for fname in tier2_funcs:
-        fdef = func_map.get(fname, {})
-        desc = fdef.get("description", "")[:60]
-        tier2_blocks.append(f"  {fname} — {desc}")
-
-    functions_text = "PRIMARY FUNCTIONS (most relevant to query):\n"
-    functions_text += "\n".join(tier1_blocks) if tier1_blocks else "  (none)"
-    if tier2_blocks:
-        functions_text += "\n\nOTHER AVAILABLE FUNCTIONS:\n"
-        functions_text += "\n".join(tier2_blocks)
+    functions_text = "AVAILABLE FUNCTIONS (Glyphh relevance score shown, higher = more relevant):\n"
+    functions_text += "\n".join(func_blocks) if func_blocks else "  (none)"
 
     system = (
-        "You select function calls for a stateful tool-use system. "
-        "The system maintains working directory and login state across turns.\n\n"
-        "RULES:\n"
-        "1. Call EXACTLY the functions the user asks for — no more, no less.\n"
-        "2. Directory navigation (cd): include ONLY when the user explicitly mentions "
-        "going to, navigating to, or operating 'in'/'within' a NAMED directory. "
-        "Do NOT add cd() for operations on files in the current directory.\n"
-        "3. NEVER add find() as a preparatory step. Files exist in the working directory. "
-        "Only include find() if the user explicitly says 'find', 'search for', or 'locate'.\n"
-        "4. Do NOT add ls() unless the user explicitly asks to list or see directory contents.\n"
-        "5. Do NOT add cat() unless the user explicitly asks to read/view/display file contents.\n"
-        "6. Do NOT add authentication or login calls unless the user explicitly asks to log in.\n"
-        "7. Each turn is independent — do NOT repeat calls from previous turns.\n"
-        "8. If the user asks for multiple distinct actions in one message, include all of them.\n"
-        "9. If the user says to create/write a file, include touch() or echo() as appropriate.\n"
-        "10. If no function matches, return [].\n\n"
-        "Return ONLY a JSON array. Each element: {\"function_name\": {\"param\": \"value\"}}.\n"
-        "No explanation, no markdown — just the JSON array."
+        "You select the correct function call(s) for each turn of a stateful conversation. "
+        "Given the user's request, the current system state, and the available functions "
+        "(ranked by semantic relevance), call exactly what the user is asking for.\n\n"
+        "Return ONLY a JSON array — each element has ONE key = function name, value = arguments object. "
+        "Example: [{\"cd\": {\"folder\": \"src\"}}, {\"mv\": {\"source\": \"old.txt\", \"destination\": \"new.txt\"}}]. "
+        "Return [] if no function matches. No explanation, no markdown."
     )
 
     user_msg = f"{functions_text}\n\n"
 
-    # Add intent signals from Glyphh models
-    hints = []
+    # Glyphh-derived factual signals — observations from HDC models, not instructions.
+    # The LLM reasons from these facts rather than following hardcoded rules.
+    signals = []
 
-    # Directory intent
     if cd_hint:
-        if cd_hint.get("needs_cd") and cd_hint.get("confidence", 0) >= 0.03:
-            hints.append(
-                f"CD SIGNAL: Navigation intent detected (conf={cd_hint['confidence']:.3f}). "
-                "Consider including cd() if a specific directory is mentioned."
-            )
-        elif not cd_hint.get("needs_cd") and cd_hint.get("confidence", 0) >= 0.01:
-            hints.append(
-                f"CD SIGNAL: No navigation intent (conf={cd_hint['confidence']:.3f}). "
-                "Do NOT add cd()."
-            )
+        if cd_hint.get("needs_cd"):
+            signals.append(f"Navigation intent: YES (confidence={cd_hint['confidence']:.2f})")
+        else:
+            signals.append(f"Navigation intent: NO (confidence={cd_hint['confidence']:.2f})")
 
-    # File creation intent — only hint when confident
-    if touch_hint and touch_hint.get("needs_touch") and touch_hint.get("confidence", 0) >= 0.09:
-        hints.append(
-            "FILE CREATION SIGNAL: Writing new content to a file detected. "
-            "Include touch() to create the file before echo() writes to it."
-        )
+    if touch_hint:
+        if touch_hint.get("needs_touch"):
+            signals.append("File creation intent: YES")
 
-    # Search suppression — only inject when find is in the top Glyphh scores
-    # (i.e., when there's actual risk of the LLM adding find)
-    find_in_top = any(
-        s["function"] == "find" for s in glyphh_scores[:8]
-    ) if glyphh_scores else False
+    if search_hint:
+        if search_hint.get("wants_find"):
+            signals.append("Search/find intent: YES")
+        else:
+            signals.append("Search/find intent: NO")
 
-    if search_hint and find_in_top:
-        if not search_hint.get("wants_find"):
-            hints.append(
-                "SEARCH SIGNAL: No search intent detected. Do NOT add find() — "
-                "operate on files directly by name."
-            )
+    if pathway_context:
+        depth = pathway_context.get("depth", 0)
+        active_pats = pathway_context.get("active_patterns", [])
+        if depth > 0:
+            signals.append(f"Pathway depth: {depth} step(s) in current sequence")
+        if active_pats:
+            signals.append(f"Active trajectory patterns: {', '.join(active_pats[:3])}")
 
-    if hints:
-        user_msg += "GLYPHH SIGNALS:\n" + "\n".join(f"  • {h}" for h in hints) + "\n\n"
+    if signals:
+        user_msg += "GLYPHH INTENT SIGNALS:\n" + "\n".join(f"  {s}" for s in signals) + "\n\n"
 
-    # Add filesystem state context
+    # Filesystem state — factual observations from StateTracker for LLM to reason about
     if state_hint:
         cwd = state_hint.get("cwd", "/")
         files_here = state_hint.get("files_here", [])
         dirs_here = state_hint.get("dirs_here", [])
-        cd_signal = state_hint.get("needs_cd_signal", "unclear")
+        query_mentions_child = state_hint.get("query_mentions_child")
+        query_mentions_other = state_hint.get("query_mentions_other_dir")
+        needs_cd_signal = state_hint.get("needs_cd_signal", "unclear")
 
-        state_lines = [f"Current working directory: {cwd}"]
+        state_lines = [f"Working directory: {cwd}"]
         if files_here:
-            state_lines.append(f"Files here: {', '.join(files_here[:10])}")
+            state_lines.append(f"Files: {', '.join(files_here[:10])}")
         if dirs_here:
-            state_lines.append(f"Subdirectories here: {', '.join(dirs_here[:10])}")
+            state_lines.append(f"Subdirectories: {', '.join(dirs_here[:10])}")
 
-        if cd_signal == "likely_yes":
-            child = state_hint.get("query_mentions_child")
-            if child:
-                state_lines.append(
-                    f"The query references '{child}' which is a subdirectory here — "
-                    "cd() into it before operating."
-                )
-            else:
-                state_lines.append(
-                    "The query references a directory that is NOT the current one — "
-                    "cd() is likely needed."
-                )
-        elif cd_signal == "likely_no":
+        # Glyphh StateTracker conclusion: derived from HDC similarity between query and filesystem state
+        if query_mentions_child:
             state_lines.append(
-                "The query references files/dirs in the current directory — "
-                "do NOT add cd()."
+                f"StateTracker: query references '{query_mentions_child}' (a known subdirectory) — "
+                f"navigation away from current directory detected"
             )
+        elif query_mentions_other:
+            state_lines.append(
+                f"StateTracker: query references '{query_mentions_other}' — "
+                f"a directory in the tree but not the current location"
+            )
+        elif needs_cd_signal == "likely_no":
+            state_lines.append("StateTracker: query references files in the current directory — no navigation needed")
 
-        user_msg += "FILESYSTEM STATE:\n" + "\n".join(f"  {l}" for l in state_lines) + "\n\n"
+        user_msg += "SYSTEM STATE:\n" + "\n".join(f"  {l}" for l in state_lines) + "\n\n"
 
     user_msg += f"User: {query}"
 
@@ -510,13 +826,7 @@ def _llm_select_and_call(
     messages.append({"role": "user", "content": user_msg})
 
     try:
-        resp = llm.client.chat.completions.create(
-            model=llm.model,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=512,
-        )
-        text = resp.choices[0].message.content.strip()
+        text = llm.chat_complete(messages, max_tokens=512)
 
         # Strip markdown code fences
         if text.startswith("```"):
@@ -525,7 +835,12 @@ def _llm_select_and_call(
                 text = text[:-3]
             text = text.strip()
 
-        calls = _json.loads(text)
+        # Robust JSON parsing: LLM sometimes returns objects without array brackets.
+        # e.g. '{"mkdir": {...}}, {"mv": {...}}' → wrap in brackets for valid JSON
+        text_stripped = text.strip()
+        if text_stripped and not text_stripped.startswith("["):
+            text_stripped = "[" + text_stripped + "]"
+        calls = _json.loads(text_stripped)
         if not isinstance(calls, list):
             calls = [calls]
 
@@ -537,12 +852,6 @@ def _llm_select_and_call(
                 for fname, args in call.items():
                     if fname in valid_names:
                         result[fname] = args if isinstance(args, dict) else {}
-
-        # Soft hard gate: strip find() only when search intent is very low
-        # Threshold 0.05 — blocks "Read the file X" (score ~0.04) but allows
-        # "Find the file named X" (score ~0.08) through
-        if search_hint and search_hint.get("confidence", 1.0) < 0.05 and "find" in result:
-            del result["find"]
 
         return result
     except Exception:

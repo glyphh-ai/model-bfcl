@@ -1,32 +1,45 @@
 """
-Thin LLM client for argument extraction.
+Thin LLM client for argument extraction and routing disambiguation.
 
 Glyphh handles routing. This module only extracts function arguments
 from the query + function signature. It's intentionally minimal —
 the LLM is a dumb pipe, not the brain.
 
-Supports: OpenAI-compatible APIs (GPT-4.1-nano, etc.), Google Gemini.
+Supports: OpenAI (GPT-4.1-nano etc.), Google Gemini, Anthropic (Claude).
+
+All clients expose a unified `chat_complete(messages, max_tokens) -> str` method
+so callers don't need to know which provider is in use.
 """
 
 import json
 import os
 from typing import Any
 
-# Load .env if present
-_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env")
-if os.path.exists(_env_path):
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _key, _val = _line.split("=", 1)
-                os.environ.setdefault(_key.strip(), _val.strip())
+# Load .env from multiple locations (local bfcl/.env takes precedence)
+def _load_env(*paths: str) -> None:
+    for path in paths:
+        if os.path.exists(path):
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        os.environ.setdefault(key.strip(), val.strip())
+
+_here = os.path.dirname(os.path.abspath(__file__))
+_load_env(
+    os.path.join(_here, ".env"),                        # bfcl/.env  (local, highest priority)
+    os.path.join(_here, "..", "..", ".env"),            # glyphh-master/.env
+    os.path.join(_here, "..", "..", "glyphh-runtime", ".env"),
+)
 
 
 def get_client(provider: str = "openai", model: str = "gpt-4.1-nano"):
-    """Get an LLM client for argument extraction."""
+    """Get an LLM client for argument extraction and routing disambiguation."""
     if provider == "openai":
         return OpenAIClient(model)
+    elif provider == "anthropic":
+        return AnthropicClient(model)
     elif provider == "gemini":
         return GeminiClient(model)
     else:
@@ -46,6 +59,16 @@ class OpenAIClient:
             from openai import OpenAI
             self._client = OpenAI()
         return self._client
+
+    def chat_complete(self, messages: list[dict], max_tokens: int = 512) -> str:
+        """Unified interface: send messages, return assistant reply text."""
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.0,
+            max_tokens=max_tokens,
+        )
+        return resp.choices[0].message.content.strip()
 
     def extract_args(
         self,
@@ -190,6 +213,95 @@ class OpenAIClient:
             func_def=func_def,
             context=conversation,
         )
+
+
+class AnthropicClient:
+    """Anthropic Claude API client."""
+
+    def __init__(self, model: str = "claude-haiku-4-5-20251001"):
+        self.model = model
+        self._client = None
+
+    @property
+    def client(self):
+        if self._client is None:
+            import anthropic
+            self._client = anthropic.Anthropic(
+                api_key=os.environ.get("ANTHROPIC_API_KEY")
+            )
+        return self._client
+
+    def chat_complete(self, messages: list[dict], max_tokens: int = 512) -> str:
+        """Unified interface: send messages, return assistant reply text."""
+        system = next(
+            (m["content"] for m in messages if m["role"] == "system"), None
+        )
+        non_system = [m for m in messages if m["role"] != "system"]
+
+        kwargs = dict(
+            model=self.model,
+            messages=non_system,
+            temperature=0.0,
+            max_tokens=max_tokens,
+        )
+        if system:
+            kwargs["system"] = system
+
+        resp = self.client.messages.create(**kwargs)
+        return resp.content[0].text.strip()
+
+    def extract_args(
+        self,
+        query: str,
+        func_name: str,
+        func_def: dict,
+        context: list[dict] | None = None,
+    ) -> dict:
+        params = func_def.get("parameters", {})
+        props = params.get("properties", {})
+        required = params.get("required", [])
+        param_lines = []
+        for pname, pdef in props.items():
+            ptype = pdef.get("type", "any")
+            pdesc = pdef.get("description", "")
+            req = "(required)" if pname in required else "(optional)"
+            default = f", default={pdef['default']}" if "default" in pdef else ""
+            enum = f", enum={pdef['enum']}" if "enum" in pdef else ""
+            param_lines.append(f"  - {pname}: {ptype} {req} — {pdesc}{default}{enum}")
+        param_block = "\n".join(param_lines) if param_lines else "  (no parameters)"
+
+        system = (
+            "You extract function call arguments from a user query. "
+            "Return ONLY a JSON object with the argument names and values. "
+            "No explanation, no markdown, no wrapping — just the raw JSON object."
+        )
+        user_msg = f"Function: {func_name}\nParameters:\n{param_block}\n\nQuery: {query}"
+
+        messages = [{"role": "system", "content": system}]
+        if context:
+            messages.extend(context)
+        messages.append({"role": "user", "content": user_msg})
+
+        try:
+            text = self.chat_complete(messages, max_tokens=512)
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
+            return json.loads(text)
+        except Exception:
+            return {}
+
+    def extract_multi_call_args(self, query, func_names, func_defs, context=None):
+        results = []
+        for fname, fdef in zip(func_names, func_defs):
+            args = self.extract_args(query, fname, fdef, context)
+            results.append({fname: args})
+        return results
+
+    def multi_turn_step(self, query, func_name, func_def, conversation, state_summary=""):
+        return self.extract_args(query, func_name, func_def, conversation)
 
 
 class GeminiClient:

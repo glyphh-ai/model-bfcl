@@ -33,12 +33,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from handler import GlyphhBFCLHandler
 
-# Use V4 data from the bfcl_eval package (installed via pip)
-import bfcl_eval
-DATA_DIR = Path(bfcl_eval.__file__).parent / "data"
+# Local data cache — downloaded from HuggingFace on first run
+DATA_DIR = Path(__file__).parent / "data" / "bfcl"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR = Path(__file__).parent / "results"
 
-HF_BASE = "https://huggingface.co/datasets/gorilla-llm/Berkeley-Function-Calling-Leaderboard/resolve/main"
+GH_BASE = "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/berkeley-function-call-leaderboard/bfcl_eval/data"
 
 # ── All BFCL V4 data files (using actual V4 data) ──
 
@@ -113,7 +113,9 @@ PARALLEL_CATS = {"parallel", "live_parallel"}
 # ── Data download ──
 
 def download_data(categories: list[str] | None = None):
-    """Check that BFCL V4 data exists in the bfcl_eval package."""
+    """Download BFCL V4 data files from HuggingFace if not already present."""
+    import urllib.request
+
     cats = categories or list(BFCL_FILES.keys())
     for cat in cats:
         if cat in BFCL_FILES:
@@ -121,13 +123,27 @@ def download_data(categories: list[str] | None = None):
             if filepath.exists():
                 print(f"  ✓ {BFCL_FILES[cat]}")
             else:
-                print(f"  ✗ {BFCL_FILES[cat]} — MISSING from bfcl_eval package")
+                url = f"{GH_BASE}/{BFCL_FILES[cat]}"
+                print(f"  ↓ {BFCL_FILES[cat]}...", end=" ", flush=True)
+                try:
+                    filepath.parent.mkdir(parents=True, exist_ok=True)
+                    urllib.request.urlretrieve(url, filepath)
+                    print("done")
+                except Exception as e:
+                    print(f"FAILED: {e}")
         if cat in BFCL_ANSWER_FILES:
             filepath = DATA_DIR / BFCL_ANSWER_FILES[cat]
             if filepath.exists():
                 print(f"  ✓ {BFCL_ANSWER_FILES[cat]}")
             else:
-                print(f"  ✗ {BFCL_ANSWER_FILES[cat]} — MISSING")
+                url = f"{GH_BASE}/{BFCL_ANSWER_FILES[cat]}"
+                print(f"  ↓ {BFCL_ANSWER_FILES[cat]}...", end=" ", flush=True)
+                try:
+                    filepath.parent.mkdir(parents=True, exist_ok=True)
+                    urllib.request.urlretrieve(url, filepath)
+                    print("done")
+                except Exception as e:
+                    print(f"FAILED: {e}")
 
 
 
@@ -224,12 +240,22 @@ def extract_expected_tools(answer_entry: dict, category: str) -> set[str] | str 
 
 # ── Category evaluation ──
 
+# Confidence ceiling — above this Glyphh is decisive enough to skip LLM disambiguation.
+# Below it the correct answer is often in top-5 but ranked wrong; LLM fixes these.
+LLM_FALLBACK_THRESHOLD = 0.45
+
+
 def run_category(
     handler: GlyphhBFCLHandler,
     category: str,
+    llm=None,
     max_entries: int | None = None,
 ) -> dict:
-    """Run evaluation on a single BFCL category (Glyphh routing only)."""
+    """Run evaluation on a single BFCL category.
+
+    When llm is provided, any routing result with conf < LLM_FALLBACK_THRESHOLD
+    is passed to the LLM for disambiguation using the top-5 Glyphh candidates.
+    """
     filename = BFCL_FILES.get(category)
     if not filename:
         print(f"  Unknown category: {category}")
@@ -274,10 +300,10 @@ def run_category(
             result = _eval_irrelevance(handler, query, func_defs, entry_id)
         elif category in MULTI_ROUTE_CATS:
             expected = extract_expected_tools(answers.get(entry_id), category)
-            result = _eval_multi_route(handler, query, func_defs, entry_id, expected)
+            result = _eval_multi_route(handler, query, func_defs, entry_id, expected, llm=llm)
         else:
             expected = extract_expected_tools(answers.get(entry_id), category)
-            result = _eval_single_route(handler, query, func_defs, entry_id, expected)
+            result = _eval_single_route(handler, query, func_defs, entry_id, expected, llm=llm)
 
         total_latency += result["latency_ms"]
         results.append(result)
@@ -299,24 +325,126 @@ def run_category(
     }
 
 
+def _llm_disambiguate(
+    llm,
+    query: str,
+    func_defs: list[dict],
+    top_k_scores: list[dict],
+    multi: bool = False,
+) -> str | list[str] | None:
+    """LLM disambiguation for low-confidence Glyphh routing.
+
+    Called when Glyphh's top-1 confidence is below LLM_FALLBACK_THRESHOLD.
+    LLM receives the top-5 Glyphh-ranked function signatures and picks the best.
+
+    Args:
+        multi: If True, LLM may return multiple function names (parallel_multiple).
+
+    Returns:
+        Single function name string (single-route), list of names (multi-route),
+        or None if no match.
+    """
+    import json as _json
+
+    # Build compact function list (top-8 for multi-route, top-5 for single-route)
+    top_k = 8 if multi else 5
+    top_names = [s["function"] for s in top_k_scores[:top_k]]
+    func_map = {fd["name"]: fd for fd in func_defs}
+
+    func_blocks = []
+    for fname in top_names:
+        fdef = func_map.get(fname, {})
+        desc = fdef.get("description", "")[:120]
+        params = fdef.get("parameters", {}).get("properties", {})
+        required = fdef.get("parameters", {}).get("required", [])
+        param_parts = []
+        for pname, pdef in list(params.items())[:6]:
+            ptype = pdef.get("type", "any")
+            req = "*" if pname in required else ""
+            param_parts.append(f"{pname}{req}: {ptype}")
+        sig = f"({', '.join(param_parts)})" if param_parts else "()"
+        func_blocks.append(f"  {fname}{sig} — {desc}")
+
+    functions_text = "\n".join(func_blocks)
+
+    if multi:
+        system = (
+            "Pick the function(s) from the list that the user query is asking to call. "
+            "Return ONLY a JSON array of function name strings. "
+            "Example: [\"func_a\", \"func_b\"]. Return [] if none match."
+        )
+    else:
+        system = (
+            "Pick the single function from the list that best matches the user query. "
+            "Return ONLY the function name as a plain string (no quotes, no JSON, no explanation). "
+            "Return NONE if no function matches."
+        )
+
+    user_msg = f"Functions:\n{functions_text}\n\nUser query: {query}"
+
+    try:
+        text = llm.chat_complete(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            max_tokens=64,
+        ).strip('"').strip("'")
+
+        valid_names = {fd["name"] for fd in func_defs}
+
+        if multi:
+            try:
+                names = _json.loads(text)
+                if not isinstance(names, list):
+                    names = [names]
+                return [n for n in names if n in valid_names]
+            except Exception:
+                # Try single name fallback
+                return [text] if text in valid_names else []
+        else:
+            if text.upper() == "NONE" or text not in valid_names:
+                return None
+            return text
+    except Exception:
+        return None
+
+
 def _eval_single_route(
     handler: GlyphhBFCLHandler,
     query: str,
     func_defs: list[dict],
     entry_id: str,
     expected: str | None,
+    llm=None,
 ) -> dict:
-    """Evaluate single-function routing."""
+    """Evaluate single-function routing.
+
+    LLM fallback: when Glyphh conf < LLM_FALLBACK_THRESHOLD, pass top-5 to LLM.
+    """
     route_result = handler.route(query, func_defs)
-    is_correct = route_result["tool"] == expected if expected else False
+    predicted = route_result["tool"]
+    conf = route_result["confidence"]
+    top_k_scores = route_result.get("all_scores", [])
+    llm_used = False
+
+    # LLM fallback for uncertain routing
+    if llm and conf < LLM_FALLBACK_THRESHOLD and top_k_scores:
+        llm_pick = _llm_disambiguate(llm, query, func_defs, top_k_scores, multi=False)
+        if llm_pick is not None:
+            predicted = llm_pick
+            llm_used = True
+
+    is_correct = predicted == expected if expected else False
 
     return {
         "id": entry_id,
         "query": query[:100],
         "expected": expected,
-        "predicted": route_result["tool"],
-        "confidence": route_result["confidence"],
+        "predicted": predicted,
+        "confidence": conf,
         "correct": is_correct,
+        "llm_used": llm_used,
         "latency_ms": route_result["latency_ms"],
         "top_k": route_result["top_k"],
     }
@@ -328,10 +456,28 @@ def _eval_multi_route(
     func_defs: list[dict],
     entry_id: str,
     expected: set[str] | None,
+    llm=None,
 ) -> dict:
-    """Evaluate multi-function routing."""
+    """Evaluate multi-function routing.
+
+    LLM always handles multi-route selection when available — Glyphh's gap analysis
+    is heuristic and frequently over/under-selects. LLM sees Glyphh's top-8 ranked
+    functions and picks the correct set.
+    When no LLM, falls back to Glyphh's heuristic selection.
+    """
     route_result = handler.route_multi(query, func_defs)
     predicted_tools = set(route_result["tools"])
+    conf = route_result["confidence"]
+    top_k_scores = route_result.get("all_scores", [])
+    llm_used = False
+
+    # Always use LLM for multi-route when available — gap analysis is too imprecise
+    if llm and top_k_scores:
+        llm_picks = _llm_disambiguate(llm, query, func_defs, top_k_scores, multi=True)
+        if llm_picks is not None:
+            predicted_tools = set(llm_picks)
+            llm_used = True
+
     is_correct = predicted_tools == expected if expected else False
 
     return {
@@ -339,8 +485,9 @@ def _eval_multi_route(
         "query": query[:100],
         "expected": sorted(expected) if expected else [],
         "predicted": sorted(predicted_tools),
-        "confidence": route_result["confidence"],
+        "confidence": conf,
         "correct": is_correct,
+        "llm_used": llm_used,
         "latency_ms": route_result["latency_ms"],
         "top_k": route_result["top_k"],
     }
@@ -466,166 +613,6 @@ def run_multi_turn_category(
         "correct_turns": correct_turns,
         "results": results,
     }
-
-def run_multi_turn_with_observer(
-    observer,
-    category: str,
-    max_entries: int | None = None,
-    top_k: int = 3,
-) -> dict:
-    """Run multi-turn evaluation using the Observer (Model C).
-
-    The Observer runs Model A + Model B internally and uses deductive
-    reasoning to pick the best function sequence per turn.
-    """
-    from multi_turn_handler import (
-        get_available_functions,
-        extract_turn_query,
-        parse_ground_truth_step,
-    )
-    from observer import _domain_from_classes
-
-    filename = BFCL_FILES.get(category)
-    if not filename:
-        print(f"  Unknown category: {category}")
-        return {}
-
-    filepath = DATA_DIR / filename
-    if not filepath.exists():
-        print(f"  Data not found: {filepath}. Run with --download-only first.")
-        return {}
-
-    entries = load_bfcl_file(filepath)
-    if max_entries:
-        entries = entries[:max_entries]
-
-    # Load answers
-    answer_file = BFCL_ANSWER_FILES.get(category)
-    answers = {}
-    if answer_file:
-        answer_path = DATA_DIR / answer_file
-        if answer_path.exists():
-            for ae in load_bfcl_file(answer_path):
-                answers[ae.get("id", "")] = ae
-
-    results = []
-    correct = 0
-    total = 0
-    total_latency = 0.0
-
-    for i, entry in enumerate(entries):
-        _progress(i + 1, len(entries), category[:25])
-
-        entry_id = entry.get("id", f"{category}_{i}")
-        answer = answers.get(entry_id, {})
-        ground_truth = answer.get("ground_truth", [])
-
-        if not ground_truth:
-            continue
-
-        total += 1
-        start = time.perf_counter()
-
-        turns = entry.get("question", [])
-        available_funcs = get_available_functions(entry)
-        involved_classes = entry.get("involved_classes", [])
-
-        if not available_funcs:
-            results.append({
-                "id": entry_id, "turns": len(turns),
-                "correct_turns": 0, "total_turns": len(turns),
-                "correct": False, "details": [],
-            })
-            continue
-
-        available_names = {f["name"] for f in available_funcs}
-        domain_hint = _domain_from_classes(involved_classes)
-
-        turn_results = []
-        correct_turns = 0
-
-        for turn_idx, turn in enumerate(turns):
-            query = extract_turn_query(turn)
-            if not query:
-                turn_results.append({
-                    "turn": turn_idx, "correct": False, "reason": "no_query",
-                })
-                continue
-
-            expected_step = ground_truth[turn_idx] if turn_idx < len(ground_truth) else []
-            expected_calls = parse_ground_truth_step(expected_step)
-
-            if not expected_calls:
-                turn_results.append({
-                    "turn": turn_idx, "correct": True,
-                    "expected": [], "predicted": [],
-                    "reason": "no_call_expected",
-                })
-                correct_turns += 1
-                continue
-
-            expected_funcs = []
-            for call in expected_calls:
-                expected_funcs.extend(call.keys())
-
-            # Observer decides using Model A + Model B + deductive reasoning
-            predicted_funcs = observer.decide(
-                query, available_funcs, available_names,
-                domain_hint=domain_hint, top_k=top_k,
-            )
-
-            func_correct = list(predicted_funcs) == list(expected_funcs)
-
-            turn_results.append({
-                "turn": turn_idx,
-                "correct": func_correct,
-                "expected_funcs": expected_funcs,
-                "predicted_funcs": predicted_funcs,
-                "mode": "observer",
-            })
-
-            if func_correct:
-                correct_turns += 1
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        total_latency += elapsed_ms
-
-        entry_result = {
-            "id": entry_id,
-            "turns": len(turns),
-            "correct_turns": correct_turns,
-            "total_turns": len(turn_results),
-            "correct": correct_turns == len(turn_results),
-            "details": turn_results,
-            "latency_ms": elapsed_ms,
-        }
-        results.append(entry_result)
-
-        if entry_result["correct"]:
-            correct += 1
-
-    print()
-
-    accuracy = correct / total if total else 0
-    avg_latency = total_latency / total if total else 0
-
-    total_turns = sum(r["total_turns"] for r in results)
-    correct_turns_total = sum(r["correct_turns"] for r in results)
-    turn_accuracy = correct_turns_total / total_turns if total_turns else 0
-
-    return {
-        "category": category,
-        "total": total,
-        "correct": correct,
-        "accuracy": accuracy,
-        "avg_latency_ms": avg_latency,
-        "turn_accuracy": turn_accuracy,
-        "total_turns": total_turns,
-        "correct_turns": correct_turns_total,
-        "results": results,
-    }
-
-
 
 # ── V4 score computation ──
 
@@ -836,13 +823,11 @@ def main():
                         help="Similarity threshold for routing")
     parser.add_argument("--output", type=str, default=None,
                         help="Directory to save results JSON")
-    parser.add_argument("--observer", action="store_true", default=False,
-                        help="Use Observer (Model C) for multi-turn — 3-model cognitive architecture")
     # LLM options (for multi-turn + arg extraction)
-    parser.add_argument("--llm-provider", type=str, default="openai",
-                        choices=["openai", "gemini"],
-                        help="LLM provider for argument extraction")
-    parser.add_argument("--llm-model", type=str, default="gpt-4.1-nano",
+    parser.add_argument("--llm-provider", type=str, default="anthropic",
+                        choices=["openai", "anthropic", "gemini"],
+                        help="LLM provider for routing disambiguation + multi-turn")
+    parser.add_argument("--llm-model", type=str, default="claude-haiku-4-5-20251001",
                         help="LLM model name")
     args = parser.parse_args()
 
@@ -871,49 +856,31 @@ def main():
 
     handler = GlyphhBFCLHandler(threshold=args.threshold)
 
-    # Initialize LLM client if multi-turn categories are requested
+    # Initialize LLM — used for multi-turn AND routing disambiguation (conf < LLM_FALLBACK_THRESHOLD)
     llm = None
-    if mt_cats and not args.observer:
-        try:
-            from llm_client import get_client
-            llm = get_client(args.llm_provider, args.llm_model)
-            print(f"LLM: {args.llm_provider}/{args.llm_model}")
-        except Exception as e:
-            print(f"LLM init failed ({e}), multi-turn will use routing-only")
-
-    # Initialize Observer (Model C) if requested
-    observer = None
-    if args.observer and mt_cats:
-        from observer import Observer
-        from pattern_encoder import PatternRouter
-        print("Building Observer (Model C)...")
-        pattern_router = PatternRouter()
-        pattern_router.build(min_count=2)
-        observer = Observer(handler, pattern_router)
-        print("  Building reference observations from training data...")
-        observer.build()
-        print(f"  Observer ready: {len(observer.ref_glyphs)} reference observations")
+    needs_llm = mt_cats or args.full_v4 or (args.categories and any(
+        c not in set(V4_MULTITURN_CATS) for c in (args.categories or [])
+    ))
+    try:
+        from llm_client import get_client
+        llm = get_client(args.llm_provider, args.llm_model)
+        print(f"LLM: {args.llm_provider}/{args.llm_model} (fallback threshold={LLM_FALLBACK_THRESHOLD})")
+    except Exception as e:
+        print(f"LLM init failed ({e}), running Glyphh routing-only")
 
     print(f"\nCategories: {categories}")
     print(f"Threshold: {args.threshold}")
-    if observer:
-        print(f"Multi-turn handler: Observer (Model C) — 3-model cognitive architecture")
     print()
 
     category_results = []
     for cat in categories:
         print(f"── {cat} ──")
         if cat in set(V4_MULTITURN_CATS):
-            if observer:
-                result = run_multi_turn_with_observer(
-                    observer, cat, max_entries=args.max_entries,
-                )
-            else:
-                result = run_multi_turn_category(
-                    handler, cat, llm=llm, max_entries=args.max_entries,
-                )
+            result = run_multi_turn_category(
+                handler, cat, llm=llm, max_entries=args.max_entries,
+            )
         else:
-            result = run_category(handler, cat, max_entries=args.max_entries)
+            result = run_category(handler, cat, llm=llm, max_entries=args.max_entries)
         if result:
             category_results.append(result)
 
@@ -949,7 +916,7 @@ def _download_multi_turn_func_docs():
         fpath = doc_dir / fname
         if fpath.exists():
             continue
-        url = f"{HF_BASE}/multi_turn_func_doc/{fname}"
+        url = f"{GH_BASE}/multi_turn_func_doc/{fname}"
         print(f"  ↓ multi_turn_func_doc/{fname}...", end=" ", flush=True)
         try:
             urllib.request.urlretrieve(url, fpath)

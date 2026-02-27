@@ -138,14 +138,39 @@ _ACTION_MAP = {
     "compress": "compress", "decompress": "decompress",
 }
 
+# Impact ranking: higher = more semantically decisive. Used to select the
+# highest-impact verb when multiple action verbs appear in a query.
+_VERB_IMPACT = {
+    "delete": 10, "destroy": 10,
+    "remove": 9,
+    "create": 8, "generate": 8, "build": 8, "make": 8,
+    "update": 7, "modify": 7, "set": 7, "replace": 7,
+    "calculate": 6, "compute": 6, "convert": 6,
+    "send": 6, "upload": 6, "download": 6, "encrypt": 6, "decrypt": 6,
+    "validate": 5, "check": 5, "verify": 5,
+    "search": 5, "find": 5, "filter": 5,
+    "add": 4, "insert": 4, "append": 4,
+    "get": 3, "fetch": 3, "retrieve": 3, "list": 3, "read": 3,
+    "open": 2, "close": 2, "start": 2, "stop": 2, "run": 2,
+}
+
 
 def _extract_action(text: str) -> str:
-    """Extract the primary action verb from text."""
+    """Extract the highest-impact action verb from text.
+
+    Scans all words and returns the mapped action with the highest impact
+    score, rather than the first action found left-to-right. This prevents
+    adverbs and setup phrases near the start from shadowing the key verb.
+    """
     words = re.sub(r"[^a-z\s]", "", text.lower()).split()
+    best_action, best_impact = "none", -1
     for w in words:
         if w in _ACTION_MAP:
-            return _ACTION_MAP[w]
-    return "none"
+            mapped = _ACTION_MAP[w]
+            impact = _VERB_IMPACT.get(mapped, 1)
+            if impact > best_impact:
+                best_impact, best_action = impact, mapped
+    return best_action
 
 
 def _split_camel_snake(name: str) -> str:
@@ -192,6 +217,54 @@ def _bow_value(words: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Description filler stripping (Change 3)
+# ---------------------------------------------------------------------------
+
+_FILLER_PREFIX_RE = re.compile(
+    r"^(this function|a function that|use this (function )?to|this method|"
+    r"this api( call)?|returns? (the|a|an) |the function|helper function|"
+    r"utility function|this (is a|provides?)|function to)[,\s]*",
+    re.IGNORECASE,
+)
+
+
+def _clean_description(text: str) -> str:
+    """Strip boilerplate filler phrases from the start of function descriptions."""
+    return _FILLER_PREFIX_RE.sub("", text).strip()
+
+
+# ---------------------------------------------------------------------------
+# Query role differentiation helpers (Change 2)
+# ---------------------------------------------------------------------------
+
+# Words that describe HOW to do something, not WHAT — filtered from
+# description role to focus on semantic content.
+_HOW_WORDS = {
+    "tell", "give", "show", "help", "let", "know", "want", "need",
+    "please", "can", "could", "would", "should", "like", "try",
+    "using", "via", "through", "use",
+}
+
+
+def _extract_query_param_tokens(query: str) -> list[str]:
+    """Extract parameter-relevant tokens from a query.
+
+    Prioritizes: quoted strings, numbers, specific nouns.
+    Falls back to all tokenized words.
+    """
+    tokens: list[str] = []
+    # Quoted strings (likely values the user is passing)
+    tokens.extend(re.findall(r'"([^"]*)"', query))
+    tokens.extend(re.findall(r"'([^']*)'", query))
+    # Numbers (thresholds, IDs, counts)
+    tokens.extend(re.findall(r"\b\d+\.?\d*\b", query))
+    # General keywords
+    tokens.extend(_tokenize(query))
+    # Deduplicate preserving order
+    return list(dict.fromkeys(tokens))
+
+
+# ---------------------------------------------------------------------------
 # encode_function — BFCL function definition → Concept dict
 # ---------------------------------------------------------------------------
 
@@ -203,7 +276,7 @@ def encode_function(func_def: dict) -> dict:
     text_encoding="bag_of_words" handles the actual encoding.
     """
     name = func_def.get("name", "unknown")
-    description = func_def.get("description", "")
+    description = _clean_description(func_def.get("description", ""))
     name_words = _split_camel_snake(name)
 
     # Action: from function name first, then description
@@ -238,19 +311,23 @@ def encode_function(func_def: dict) -> dict:
 def encode_query(query: str) -> dict:
     """Convert a user query into a Concept-compatible dict.
 
-    All text roles get the same keyword tokens from the query so they
-    can match against function_name, description, and parameters.
+    Each role receives a distinct signal to maximize discrimination:
+    - action:        highest-impact verb (impact-ranked, Change 1)
+    - function_name: ALL query tokens — wide net to match function name tokens
+    - description:   WHAT tokens only — filtered of HOW/framing words
+    - parameters:    numbers, quoted values, specific nouns (Change 2)
     """
     action = _extract_action(query)
-    keywords = _tokenize(query)
-    kw_value = _bow_value(keywords)
+    all_tokens = _tokenize(query)
+    what_tokens = [t for t in all_tokens if t not in _HOW_WORDS]
+    param_tokens = _extract_query_param_tokens(query)
 
     return {
         "name": "query",
         "attributes": {
             "action": action,
-            "function_name": kw_value,
-            "description": kw_value,
-            "parameters": kw_value,
+            "function_name": _bow_value(all_tokens),
+            "description": _bow_value(what_tokens) if what_tokens else _bow_value(all_tokens),
+            "parameters": _bow_value(param_tokens) if param_tokens else _bow_value(all_tokens),
         },
     }

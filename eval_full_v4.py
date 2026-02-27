@@ -26,9 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import bfcl_eval
-
-DATA_DIR = Path(bfcl_eval.__file__).parent / "data"
+DATA_DIR = Path(__file__).parent / "data" / "bfcl"
 RESULTS_DIR = Path(__file__).parent / "results" / "full_v4"
 
 # ── Import handlers ──

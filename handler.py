@@ -106,11 +106,14 @@ class GlyphhBFCLHandler:
                                                 rweight = rd.similarity_weight
                         role_sims.append((rsim, rweight))
 
-        # Weighted combination across hierarchy levels
-        w_cortex = 0.15
-        w_layer = 0.20
+        # Weighted combination across hierarchy levels.
+        # Role-level dominates: BFCL function names are highly specific
+        # (calculate_mortgage_payment, search_hotels_by_amenity) so role-level
+        # BoW similarity is far more discriminative than holistic cortex signal.
+        w_cortex = 0.05
+        w_layer = 0.10
         w_segment = 0.25
-        w_role = 0.40
+        w_role = 0.60
 
         score = cortex_sim * w_cortex
 
@@ -230,9 +233,9 @@ class GlyphhBFCLHandler:
     ) -> list[str]:
         """Select multiple functions using score gap analysis.
 
-        Strategy: find the largest relative gap between consecutive scores.
-        Everything above the gap is selected. If no clear gap exists,
-        use a ratio-based cutoff (score >= top_score * ratio).
+        Strategy: absolute floor + cluster boundary detection.
+        BFCL parallel_multiple queries request 2-4 distinct operations —
+        selected functions should form a tight, well-separated cluster.
         """
         if not scores:
             return []
@@ -241,31 +244,25 @@ class GlyphhBFCLHandler:
             return [func_names[scores[0][1]]]
 
         top_score = scores[0][0]
+        MIN_ABS = 0.18  # Hard floor — anything below is noise
 
-        # Compute gaps between consecutive scores
-        gaps = []
-        for i in range(len(scores) - 1):
-            gap = scores[i][0] - scores[i + 1][0]
-            # Relative gap (normalized by top score)
-            rel_gap = gap / top_score if top_score > 0 else 0
-            gaps.append((rel_gap, i))
+        # Filter to candidates above the absolute floor
+        candidates = [(s, i) for s, i in scores if s >= MIN_ABS]
+        if not candidates:
+            return [func_names[scores[0][1]]]
 
-        # Find the largest gap
-        gaps.sort(key=lambda x: x[0], reverse=True)
-        best_gap, best_gap_idx = gaps[0]
+        # Find a decisive cluster break (only break on very large gaps, >60% of top).
+        # A 60% gap threshold means: 0.50→0.18 triggers (gap=0.64), but
+        # 0.46→0.25 does NOT trigger (gap=0.46), allowing the ratio fallback
+        # to include closely ranked secondary functions in parallel_multiple.
+        for j in range(len(candidates) - 1):
+            gap = candidates[j][0] - candidates[j + 1][0]
+            if top_score > 0 and gap / top_score > 0.60:
+                return [func_names[candidates[k][1]] for k in range(j + 1)]
 
-        # If there's a clear gap (>50% relative), split there
-        if best_gap > 0.50:
-            cutoff_idx = best_gap_idx + 1
-            selected = [func_names[scores[i][1]] for i in range(cutoff_idx)]
-            return selected
-
-        # No clear gap — use ratio-based cutoff
-        # Select all functions with score >= 35% of top score
-        ratio = 0.35
-        cutoff = top_score * ratio
-        selected = [func_names[idx] for s, idx in scores if s >= cutoff]
-
+        # No clear gap — use ratio-based cutoff (tightened from 0.35 to 0.45)
+        cutoff = top_score * 0.45
+        selected = [func_names[idx] for s, idx in candidates if s >= cutoff]
         return selected if selected else [func_names[scores[0][1]]]
 
     # ── Irrelevance detection ──
@@ -317,7 +314,13 @@ class GlyphhBFCLHandler:
         # function_name provides structural confirmation
         relevance = desc * 0.6 + fname * 0.4
 
-        return relevance < 0.14
+        # Hard floor: very low overall score = definitely irrelevant
+        if overall_score < 0.12:
+            return True
+
+        # Raised from 0.14: BFCL irrelevance queries are completely off-domain
+        # and should have near-zero similarity to all available functions.
+        return relevance < 0.20
 
     # ── BFCL evaluation interface ──
 
