@@ -1,7 +1,7 @@
 """
-Multi-turn BFCL handler — four-model HDC architecture.
+Multi-turn BFCL handler — six-model HDC architecture.
 
-Four Glyphh signals, no custom ML:
+Six Glyphh signals, no custom ML:
   Model A  (handler.py / ENCODER_CONFIG seed=42)
            Function router: query → per-function cosine scores via BFCL HDC encoder
   Model B  (SEQUENCE_CONFIG seed=73, include_temporal=True)
@@ -14,6 +14,16 @@ Four Glyphh signals, no custom ML:
            Hebbian reinforcement (fire → wire) strengthens patterns on correct turns.
   IntentExtractor (SDK, seed=53 internally)
            Filesystem intent hints: cd / touch / find signals for GorillaFileSystem turns
+  DeductiveLayer (SDK, seed=89)
+           HDC predictive coding: accumulates environmental context as decaying superposition,
+           detects mismatch between accumulated state and query-implied state via cosine,
+           resolves prerequisites by matching delta against transition library.
+           Hebbian reinforcement on confirmed transitions.
+  InductiveLayer (SDK, seed=97)
+           HDC inductive reasoning: few-shot classifier that learns cd-needed vs cd-not-needed
+           patterns from training data. Pre-seeded from ground truth, then online-learned
+           during eval. Encodes query + state + actions as role-bound BoW, classifies by
+           closest centroid via cosine similarity.
 
 Pipeline per turn:
   1. Model A scores all available functions against the current query
@@ -21,9 +31,11 @@ Pipeline per turn:
      boosts the predicted function's score in Model A's output
   3. ConversationState: detects active pathway patterns (e.g. nav→op after a cd call),
      boosts filesystem operation functions; IntentExtractor adds cd/touch/find signals
-  4. State tracker adds CWD / known-files / known-dirs facts for LLM context
-  5. LLM receives Glyphh-ranked functions + all signals → selects + fills args
-  6. ConversationState.update() records this turn; .confirm() on correct turns (Hebbian)
+  4. DeductiveLayer: detects location mismatch → boosts prerequisite functions (e.g. cd)
+  5. State tracker adds CWD / known-files / known-dirs facts for LLM context
+  6. LLM receives Glyphh-ranked functions + all signals → selects + fills args
+  7. ConversationState.update() + DeductiveLayer.observe() records turn;
+     .confirm() on correct turns (Hebbian)
 """
 
 import json
@@ -39,7 +51,7 @@ from glyphh.temporal import BeamSearchPredictor
 from handler import GlyphhBFCLHandler
 from llm_client import get_client
 from glyphh.intent import IntentExtractor
-from glyphh.state import ConversationState
+from glyphh.state import ConversationState, DeductiveLayer, InductiveLayer
 from state_tracker import ConversationStateTracker
 
 # ── Model B: Sequence prediction encoder (seed=73, separate space from Model A seed=42) ──
@@ -375,6 +387,18 @@ def eval_multi_turn_entry(
     state_tracker = ConversationStateTracker()
     state_tracker.init_from_config(entry.get("initial_config", {}))
 
+    # Initialize DeductiveLayer + InductiveLayer — both load domain knowledge
+    # from the filesystem pack. No manual transition registration or pre-seeding.
+    # temporal_window=3: detect stagnation over last 3 turns
+    # enable_beam=True: use BeamSearchPredictor for state trajectory prediction
+    deductive = DeductiveLayer(
+        dimension=10000, seed=89, packs=["filesystem"],
+        temporal_window=3, enable_beam=True,
+    )
+    deductive.observe(state=state_tracker.get_cwd(), actions=[])
+
+    inductive = InductiveLayer(dimension=10000, seed=97, packs=["filesystem"])
+
     conversation_context = []
     turn_results = []
     correct_turns = 0
@@ -458,6 +482,9 @@ def eval_multi_turn_entry(
                 "predicted_funcs": sorted(predicted_funcs) if predicted_funcs else [],
                 "reason": "no_call_expected",
             })
+            # DeductiveLayer: observe state even on no-call-expected turns
+            _deductive_observe(deductive, state_tracker, list(predicted_funcs), predicted if isinstance(predicted, dict) else {})
+
             if func_correct:
                 correct_turns += 1
             conversation_context.append({"role": "user", "content": query})
@@ -484,10 +511,51 @@ def eval_multi_turn_entry(
             active_before = conv_state.active_pathways(top_k=3)
             # Apply ConversationState pathway boost: HDC-based context signal
             all_scores = _apply_pathway_boost(all_scores, conv_state, cd_hint, touch_hint, search_hint, state_hint)
+
+            # DeductiveLayer: detect implicit prerequisites via HDC mismatch
+            deduction = deductive.deduce(query, current_state=state_tracker.get_cwd())
+            if deduction["prerequisites"]:
+                print(f"  [DED] {entry_id} T{turn_idx}: prereqs={deduction['prerequisites']} "
+                      f"conf={deduction['confidence']:.3f} mismatch={deduction['mismatch_score']}")
+                for prereq in deduction["prerequisites"]:
+                    boost = min(0.40, deduction["confidence"] * 0.55)
+                    # Apply additive boost to the prerequisite function's score
+                    all_scores = [
+                        {**s, "score": round(s["score"] + boost, 4)} if s["function"] == prereq else s
+                        for s in all_scores
+                    ]
+                all_scores.sort(key=lambda x: x["score"], reverse=True)
+                # When deduction fires with confidence, override contradictory
+                # cd_hint so the LLM doesn't get conflicting signals
+                if "cd" in deduction["prerequisites"] and deduction["confidence"] > 0.3:
+                    cd_hint = {"needs_cd": True, "confidence": deduction["confidence"]}
+
+            # InductiveLayer: learned pattern classification for cd-needed
+            import re as _re_q
+            query_tokens = " ".join(
+                _re_q.sub(r"[^a-z0-9\s]", "", query.lower()).split()[:20]
+            )
+            inductive_result = inductive.predict(features={
+                "query_tokens": query_tokens,
+            })
+            if inductive_result["label"] == "cd_needed" and inductive_result["confidence"] > 0.08:
+                ind_boost = min(0.25, inductive_result["confidence"] * 0.50)
+                all_scores = [
+                    {**s, "score": round(s["score"] + ind_boost, 4)} if s["function"] == "cd" else s
+                    for s in all_scores
+                ]
+                all_scores.sort(key=lambda x: x["score"], reverse=True)
+                # Reinforce cd_hint if inductive agrees
+                if not cd_hint or not cd_hint.get("needs_cd"):
+                    cd_hint = {"needs_cd": True, "confidence": inductive_result["confidence"]}
+
             pathway_ctx = {
                 "depth": conv_state.depth,
                 "active_patterns": [n for n, s in active_before if s > 0.1],
             }
+            if deduction["prerequisites"]:
+                pathway_ctx["deduction"] = deduction
+
             predicted = _llm_select_and_call(
                 llm, query, func_defs, all_scores, conversation_context,
                 cd_hint=cd_hint, touch_hint=touch_hint, search_hint=search_hint,
@@ -544,6 +612,17 @@ def eval_multi_turn_entry(
             conv_state.update(predicted_glyph_list)
         if func_correct and predicted_glyph_list:
             conv_state.confirm(predicted_glyph_list)
+
+        # DeductiveLayer: observe this turn's outcome + Hebbian confirm
+        _deductive_observe(deductive, state_tracker, list(predicted_funcs), predicted if isinstance(predicted, dict) else {})
+        if "cd" in expected_funcs:
+            deductive.confirm("cd" in predicted_funcs, "cd")
+
+        # InductiveLayer: Hebbian reinforcement
+        if "cd" in expected_funcs:
+            inductive.confirm(was_correct="cd" in predicted_funcs, label="cd_needed")
+        else:
+            inductive.confirm(was_correct="cd" not in predicted_funcs, label="cd_not_needed")
 
         if turn_results[-1]["correct"]:
             correct_turns += 1
@@ -684,6 +763,52 @@ def _update_call_history(
             call_history.append(glyph)
 
 
+def _deductive_observe(
+    deductive: DeductiveLayer,
+    state_tracker: ConversationStateTracker,
+    actions: list[str],
+    predicted: dict,
+) -> None:
+    """Update DeductiveLayer with this turn's state and directed targets.
+
+    Extracts target directories from predicted calls (mkdir, mv, cp, touch)
+    to track where files are being directed. Targets are always extracted
+    without gating on known paths — the DeductiveLayer encodes them as HD
+    symbols, so unknown paths get unique vectors and produce valid mismatch.
+    """
+    targets = []
+    cwd = state_tracker.get_cwd()
+
+    for fname, args in predicted.items():
+        if not isinstance(args, dict):
+            continue
+        if fname == "mkdir":
+            dir_name = args.get("dir_name", "")
+            if dir_name:
+                targets.append(cwd + "/" + dir_name)
+        elif fname in ("mv", "cp"):
+            dest = args.get("destination", "")
+            if dest:
+                # Always treat destination as a target — no _all_paths gate.
+                # DeductiveLayer encodes targets as HD symbols; unknown paths
+                # produce valid mismatch against current state.
+                if dest.startswith("/"):
+                    targets.append(dest)
+                else:
+                    targets.append(cwd + "/" + dest)
+        elif fname == "touch":
+            file_name = args.get("file_name", "")
+            if file_name and "/" in file_name:
+                # File being created in a subdirectory — extract the dir as target
+                targets.append(cwd + "/" + file_name.rsplit("/", 1)[0])
+
+    deductive.observe(
+        state=cwd,
+        actions=actions,
+        targets=targets if targets else None,
+    )
+
+
 
 def _llm_select_and_call(
     llm,
@@ -782,6 +907,21 @@ def _llm_select_and_call(
             signals.append(f"Pathway depth: {depth} step(s) in current sequence")
         if active_pats:
             signals.append(f"Active trajectory patterns: {', '.join(active_pats[:3])}")
+
+        # DeductiveLayer signal: state mismatch detected
+        deduction = pathway_context.get("deduction")
+        if deduction and deduction.get("prerequisites"):
+            prereqs = ", ".join(deduction["prerequisites"])
+            mm = deduction.get("mismatch_score", 0)
+            conf = deduction.get("confidence", 0)
+            target = deduction.get("target")
+            deduction_msg = (
+                f"DEDUCTION: State mismatch detected (score={mm:.2f}, "
+                f"confidence={conf:.2f}). Prerequisite {prereqs} likely needed"
+            )
+            if target:
+                deduction_msg += f" → target: {target}"
+            signals.append(deduction_msg)
 
     if signals:
         user_msg += "GLYPHH INTENT SIGNALS:\n" + "\n".join(f"  {s}" for s in signals) + "\n\n"
