@@ -12,31 +12,24 @@ Architecture (Glyphh-routed + structural verification):
   7. If verification fails, try next-best Glyphh chunks
 
 Glyphh = attention layer (routes questions to text) + verification layer
-LLM = decomposer + extractor from curated context
-
-Requires: OPENAI_API_KEY
+LLM = decomposer + extractor from curated context (local LLMEngine)
 """
+
+from __future__ import annotations
 
 import json
 import re
 import os
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from glyphh.core.config import EncoderConfig, Layer, Role, Segment
 from glyphh.core.types import Concept, Glyph
 from glyphh.core.ops import cosine_similarity
 from glyphh import Encoder
 
-# Load .env
-_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env")
-if os.path.exists(_env_path):
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _key, _val = _line.split("=", 1)
-                os.environ.setdefault(_key.strip(), _val.strip())
+if TYPE_CHECKING:
+    from glyphh.llm.engine import LLMEngine
 
 
 # ---------------------------------------------------------------------------
@@ -365,34 +358,19 @@ class WebSearchAgent:
     If verification fails, we try extracting from the next-best chunks.
     """
 
-    def __init__(self, provider: str = "openai", model: str = "gpt-4.1"):
-        self.provider = provider
-        self.model = model
-        self._client = None
+    def __init__(self, engine: LLMEngine | None = None):
+        self._engine = engine
         self.verifier = StructuralVerifier()
 
-    @property
-    def client(self):
-        if self._client is None:
-            if self.provider == "openai":
-                from openai import OpenAI
-                self._client = OpenAI()
-            else:
-                raise ValueError(f"Unsupported provider: {self.provider}")
-        return self._client
-
     def _llm(self, system: str, user: str, max_tokens: int = 300) -> str:
+        if self._engine is None:
+            return ""
         try:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=0.0,
+            return self._engine.generate(
+                system=system,
+                user=user,
                 max_tokens=max_tokens,
             )
-            return resp.choices[0].message.content.strip()
         except Exception:
             return ""
 

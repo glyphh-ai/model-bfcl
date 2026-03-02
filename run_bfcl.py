@@ -4,21 +4,33 @@ Run Glyphh HDC against the full BFCL V4 benchmark.
 
 BFCL V4 Overall = (Agentic × 40%) + (Multi-Turn × 30%) + (Live × 10%) + (Non-Live × 10%) + (Hallucination × 10%)
 
-Glyphh handles routing (Non-Live, Live, Hallucination = 30% of overall).
-A cheap LLM handles argument extraction + multi-turn + agentic (70% of overall).
+Glyphh's CognitiveLoop handles all routing via SchemaIntentClassifier
+backed by a local LLM (Qwen3-4B via llama-cpp-python).
 
 Usage:
-    # Glyphh-only routing (no API key needed)
-    python run_bfcl.py --routing-only
+    # Default eval (all routing categories)
+    python run_bfcl.py
 
-    # Full V4 eval with cheap LLM (needs OPENAI_API_KEY or GOOGLE_API_KEY)
-    python run_bfcl.py --full-v4 --llm-provider openai --llm-model gpt-4.1-nano
+    # Full V4 eval (routing + multi-turn)
+    python run_bfcl.py --full-v4
 
     # Specific categories
     python run_bfcl.py --categories simple java javascript live_simple
 
-    # Download data only
-    python run_bfcl.py --download-only
+    # Quick test
+    python run_bfcl.py --max-entries 5
+
+    # Custom model path
+    python run_bfcl.py --model-path /path/to/model.gguf
+
+    # HDC-only mode (no LLM, sub-ms per query)
+    python run_bfcl.py --hdc-only --routing-only
+
+    # LLM-only mode (no HDC scorer)
+    python run_bfcl.py --no-scorer
+
+    # Legacy keyword fallback (no scorer, no LLM)
+    python run_bfcl.py --no-llm --routing-only
 """
 
 import argparse
@@ -31,7 +43,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from handler import GlyphhBFCLHandler
+from cognitive_handler import CognitiveBFCLHandler
 
 # Local data cache — downloaded from HuggingFace on first run
 DATA_DIR = Path(__file__).parent / "data" / "bfcl"
@@ -91,7 +103,7 @@ V4_HALLUCINATION_CATS = ["irrelevance", "live_irrelevance"]
 V4_LIVE_CATS = ["live_simple", "live_multiple", "live_parallel", "live_parallel_multiple"]
 V4_MULTITURN_CATS = ["multi_turn_base", "multi_turn_miss_func", "multi_turn_miss_param", "multi_turn_long_context"]
 
-# Glyphh-only categories (no LLM needed)
+# Glyphh-only categories (no multi-turn)
 GLYPHH_ONLY_CATS = V4_NONLIVE_CATS + V4_HALLUCINATION_CATS + V4_LIVE_CATS
 
 # Categories that need multi-function routing
@@ -100,20 +112,11 @@ MULTI_ROUTE_CATS = {"parallel_multiple", "live_parallel_multiple"}
 # Categories that are irrelevance detection
 IRRELEVANCE_CATS = {"irrelevance", "live_irrelevance"}
 
-# Categories that are "simple" style (single function, AST match)
-SIMPLE_CATS = {"simple", "java", "javascript", "live_simple"}
-
-# Categories that are "multiple" style (single function from many, AST match)
-MULTIPLE_CATS = {"multiple", "live_multiple"}
-
-# Categories that are "parallel" style (multiple calls to same function)
-PARALLEL_CATS = {"parallel", "live_parallel"}
-
 
 # ── Data download ──
 
 def download_data(categories: list[str] | None = None):
-    """Download BFCL V4 data files from HuggingFace if not already present."""
+    """Download BFCL V4 data files from GitHub if not already present."""
     import urllib.request
 
     cats = categories or list(BFCL_FILES.keys())
@@ -144,8 +147,6 @@ def download_data(categories: list[str] | None = None):
                     print("done")
                 except Exception as e:
                     print(f"FAILED: {e}")
-
-
 
 
 # ── Data loading ──
@@ -200,13 +201,7 @@ def extract_query(entry: dict) -> str:
 
 
 def extract_expected_tools(answer_entry: dict, category: str) -> set[str] | str | None:
-    """Extract expected tool name(s) from an answer entry.
-
-    Returns:
-        - set of tool names for multi-route categories
-        - single tool name string for single-route categories
-        - None if no answer available
-    """
+    """Extract expected tool name(s) from an answer entry."""
     if not answer_entry:
         return None
 
@@ -240,22 +235,12 @@ def extract_expected_tools(answer_entry: dict, category: str) -> set[str] | str 
 
 # ── Category evaluation ──
 
-# Confidence ceiling — above this Glyphh is decisive enough to skip LLM disambiguation.
-# Below it the correct answer is often in top-5 but ranked wrong; LLM fixes these.
-LLM_FALLBACK_THRESHOLD = 0.45
-
-
 def run_category(
-    handler: GlyphhBFCLHandler,
+    handler: CognitiveBFCLHandler,
     category: str,
-    llm=None,
     max_entries: int | None = None,
 ) -> dict:
-    """Run evaluation on a single BFCL category.
-
-    When llm is provided, any routing result with conf < LLM_FALLBACK_THRESHOLD
-    is passed to the LLM for disambiguation using the top-5 Glyphh candidates.
-    """
+    """Run evaluation on a single BFCL category."""
     filename = BFCL_FILES.get(category)
     if not filename:
         print(f"  Unknown category: {category}")
@@ -300,10 +285,10 @@ def run_category(
             result = _eval_irrelevance(handler, query, func_defs, entry_id)
         elif category in MULTI_ROUTE_CATS:
             expected = extract_expected_tools(answers.get(entry_id), category)
-            result = _eval_multi_route(handler, query, func_defs, entry_id, expected, llm=llm)
+            result = _eval_multi_route(handler, query, func_defs, entry_id, expected)
         else:
             expected = extract_expected_tools(answers.get(entry_id), category)
-            result = _eval_single_route(handler, query, func_defs, entry_id, expected, llm=llm)
+            result = _eval_single_route(handler, query, func_defs, entry_id, expected)
 
         total_latency += result["latency_ms"]
         results.append(result)
@@ -325,115 +310,17 @@ def run_category(
     }
 
 
-def _llm_disambiguate(
-    llm,
-    query: str,
-    func_defs: list[dict],
-    top_k_scores: list[dict],
-    multi: bool = False,
-) -> str | list[str] | None:
-    """LLM disambiguation for low-confidence Glyphh routing.
-
-    Called when Glyphh's top-1 confidence is below LLM_FALLBACK_THRESHOLD.
-    LLM receives the top-5 Glyphh-ranked function signatures and picks the best.
-
-    Args:
-        multi: If True, LLM may return multiple function names (parallel_multiple).
-
-    Returns:
-        Single function name string (single-route), list of names (multi-route),
-        or None if no match.
-    """
-    import json as _json
-
-    # Build compact function list (top-8 for multi-route, top-5 for single-route)
-    top_k = 8 if multi else 5
-    top_names = [s["function"] for s in top_k_scores[:top_k]]
-    func_map = {fd["name"]: fd for fd in func_defs}
-
-    func_blocks = []
-    for fname in top_names:
-        fdef = func_map.get(fname, {})
-        desc = fdef.get("description", "")[:120]
-        params = fdef.get("parameters", {}).get("properties", {})
-        required = fdef.get("parameters", {}).get("required", [])
-        param_parts = []
-        for pname, pdef in list(params.items())[:6]:
-            ptype = pdef.get("type", "any")
-            req = "*" if pname in required else ""
-            param_parts.append(f"{pname}{req}: {ptype}")
-        sig = f"({', '.join(param_parts)})" if param_parts else "()"
-        func_blocks.append(f"  {fname}{sig} — {desc}")
-
-    functions_text = "\n".join(func_blocks)
-
-    if multi:
-        system = (
-            "Pick the function(s) from the list that the user query is asking to call. "
-            "Return ONLY a JSON array of function name strings. "
-            "Example: [\"func_a\", \"func_b\"]. Return [] if none match."
-        )
-    else:
-        system = (
-            "Pick the single function from the list that best matches the user query. "
-            "Return ONLY the function name as a plain string (no quotes, no JSON, no explanation). "
-            "Return NONE if no function matches."
-        )
-
-    user_msg = f"Functions:\n{functions_text}\n\nUser query: {query}"
-
-    try:
-        text = llm.chat_complete(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_msg},
-            ],
-            max_tokens=64,
-        ).strip('"').strip("'")
-
-        valid_names = {fd["name"] for fd in func_defs}
-
-        if multi:
-            try:
-                names = _json.loads(text)
-                if not isinstance(names, list):
-                    names = [names]
-                return [n for n in names if n in valid_names]
-            except Exception:
-                # Try single name fallback
-                return [text] if text in valid_names else []
-        else:
-            if text.upper() == "NONE" or text not in valid_names:
-                return None
-            return text
-    except Exception:
-        return None
-
-
 def _eval_single_route(
-    handler: GlyphhBFCLHandler,
+    handler: CognitiveBFCLHandler,
     query: str,
     func_defs: list[dict],
     entry_id: str,
     expected: str | None,
-    llm=None,
 ) -> dict:
-    """Evaluate single-function routing.
-
-    LLM fallback: when Glyphh conf < LLM_FALLBACK_THRESHOLD, pass top-5 to LLM.
-    """
+    """Evaluate single-function routing via CognitiveLoop."""
     route_result = handler.route(query, func_defs)
     predicted = route_result["tool"]
     conf = route_result["confidence"]
-    top_k_scores = route_result.get("all_scores", [])
-    llm_used = False
-
-    # LLM fallback for uncertain routing
-    if llm and conf < LLM_FALLBACK_THRESHOLD and top_k_scores:
-        llm_pick = _llm_disambiguate(llm, query, func_defs, top_k_scores, multi=False)
-        if llm_pick is not None:
-            predicted = llm_pick
-            llm_used = True
 
     is_correct = predicted == expected if expected else False
 
@@ -444,39 +331,22 @@ def _eval_single_route(
         "predicted": predicted,
         "confidence": conf,
         "correct": is_correct,
-        "llm_used": llm_used,
         "latency_ms": route_result["latency_ms"],
         "top_k": route_result["top_k"],
     }
 
 
 def _eval_multi_route(
-    handler: GlyphhBFCLHandler,
+    handler: CognitiveBFCLHandler,
     query: str,
     func_defs: list[dict],
     entry_id: str,
     expected: set[str] | None,
-    llm=None,
 ) -> dict:
-    """Evaluate multi-function routing.
-
-    LLM always handles multi-route selection when available — Glyphh's gap analysis
-    is heuristic and frequently over/under-selects. LLM sees Glyphh's top-8 ranked
-    functions and picks the correct set.
-    When no LLM, falls back to Glyphh's heuristic selection.
-    """
+    """Evaluate multi-function routing via CognitiveLoop."""
     route_result = handler.route_multi(query, func_defs)
     predicted_tools = set(route_result["tools"])
     conf = route_result["confidence"]
-    top_k_scores = route_result.get("all_scores", [])
-    llm_used = False
-
-    # Always use LLM for multi-route when available — gap analysis is too imprecise
-    if llm and top_k_scores:
-        llm_picks = _llm_disambiguate(llm, query, func_defs, top_k_scores, multi=True)
-        if llm_picks is not None:
-            predicted_tools = set(llm_picks)
-            llm_used = True
 
     is_correct = predicted_tools == expected if expected else False
 
@@ -487,28 +357,19 @@ def _eval_multi_route(
         "predicted": sorted(predicted_tools),
         "confidence": conf,
         "correct": is_correct,
-        "llm_used": llm_used,
         "latency_ms": route_result["latency_ms"],
         "top_k": route_result["top_k"],
     }
 
 
 def _eval_irrelevance(
-    handler: GlyphhBFCLHandler,
+    handler: CognitiveBFCLHandler,
     query: str,
     func_defs: list[dict],
     entry_id: str,
 ) -> dict:
     """Evaluate irrelevance detection. Correct = query rejected as irrelevant."""
-    route_result = handler.route(query, func_defs)
-    q_glyph = route_result.get("_query_glyph")
-    f_glyph = route_result.get("_best_func_glyph")
-
-    is_irrelevant = (
-        q_glyph is not None
-        and f_glyph is not None
-        and handler.is_irrelevant(q_glyph, f_glyph, route_result["confidence"])
-    )
+    is_irrelevant, route_result = handler.is_irrelevant_query(query, func_defs)
 
     return {
         "id": entry_id,
@@ -525,19 +386,11 @@ def _eval_irrelevance(
 # ── Multi-turn evaluation ──
 
 def run_multi_turn_category(
-    handler: GlyphhBFCLHandler,
     category: str,
-    llm=None,
+    engine=None,
     max_entries: int | None = None,
-    cognitive: bool = False,
 ) -> dict:
-    """Run evaluation on a multi-turn BFCL category.
-
-    Glyphh routes each turn. LLM extracts args (if provided).
-    Scoring is per-entry: all turns must have correct routing.
-
-    If cognitive=True, uses CognitiveLoop (LLM-free) instead of the 6-model + LLM pipeline.
-    """
+    """Run evaluation on a multi-turn BFCL category via CognitiveLoop."""
     from multi_turn_handler import (
         get_available_functions,
         extract_turn_query,
@@ -567,10 +420,6 @@ def run_multi_turn_category(
             for ae in load_bfcl_file(answer_path):
                 answers[ae.get("id", "")] = ae
 
-    # Import cognitive eval if needed
-    if cognitive:
-        from multi_turn_handler import eval_multi_turn_entry_cognitive
-
     results = []
     correct = 0
     total = 0
@@ -589,10 +438,7 @@ def run_multi_turn_category(
         total += 1
         start = time.perf_counter()
 
-        if cognitive:
-            result = eval_multi_turn_entry_cognitive(entry, ground_truth)
-        else:
-            result = eval_multi_turn_entry(handler, llm, entry, ground_truth)
+        result = eval_multi_turn_entry(entry, ground_truth, engine=engine)
         elapsed_ms = (time.perf_counter() - start) * 1000
         total_latency += elapsed_ms
 
@@ -630,12 +476,6 @@ def compute_v4_score(category_results: dict[str, dict]) -> dict:
     """Compute the full BFCL V4 overall score.
 
     V4 Overall = (Agentic × 40%) + (Multi-Turn × 30%) + (Live × 10%) + (Non-Live × 10%) + (Hallucination × 10%)
-
-    Non-Live: unweighted average of subcategories
-    Hallucination: unweighted average of non-live irrelevance + live irrelevance
-    Live: weighted average by test case count
-    Multi-Turn: unweighted average of base + augmented cases
-    Agentic: unweighted average of web search + memory
     """
     scores = {}
 
@@ -644,16 +484,14 @@ def compute_v4_score(category_results: dict[str, dict]) -> dict:
     for cat in V4_NONLIVE_CATS:
         if cat in category_results:
             nonlive_accs.append(category_results[cat]["accuracy"])
-    nonlive_score = sum(nonlive_accs) / len(nonlive_accs) if nonlive_accs else None
-    scores["non_live"] = nonlive_score
+    scores["non_live"] = sum(nonlive_accs) / len(nonlive_accs) if nonlive_accs else None
 
     # Hallucination (10%): unweighted average
     hall_accs = []
     for cat in V4_HALLUCINATION_CATS:
         if cat in category_results:
             hall_accs.append(category_results[cat]["accuracy"])
-    hall_score = sum(hall_accs) / len(hall_accs) if hall_accs else None
-    scores["hallucination"] = hall_score
+    scores["hallucination"] = sum(hall_accs) / len(hall_accs) if hall_accs else None
 
     # Live (10%): weighted average by test case count
     live_weighted_sum = 0.0
@@ -663,18 +501,16 @@ def compute_v4_score(category_results: dict[str, dict]) -> dict:
             cr = category_results[cat]
             live_weighted_sum += cr["accuracy"] * cr["total"]
             live_total_entries += cr["total"]
-    live_score = live_weighted_sum / live_total_entries if live_total_entries else None
-    scores["live"] = live_score
+    scores["live"] = live_weighted_sum / live_total_entries if live_total_entries else None
 
     # Multi-Turn (30%): unweighted average
     mt_accs = []
     for cat in V4_MULTITURN_CATS:
         if cat in category_results:
             mt_accs.append(category_results[cat]["accuracy"])
-    mt_score = sum(mt_accs) / len(mt_accs) if mt_accs else None
-    scores["multi_turn"] = mt_score
+    scores["multi_turn"] = sum(mt_accs) / len(mt_accs) if mt_accs else None
 
-    # Agentic (40%): not yet implemented
+    # Agentic (40%): not yet implemented here (see eval_full_v4.py)
     scores["agentic"] = None
 
     # Overall
@@ -780,7 +616,7 @@ def print_report(category_results: list[dict]):
     print(f"    Hallucination (10%): {v4['hallucination']:>7.1%}" if v4["hallucination"] is not None else "    Hallucination (10%): N/A")
     print(f"    Live (10%):          {v4['live']:>7.1%}" if v4["live"] is not None else "    Live (10%):          N/A")
     print(f"    Multi-Turn (30%):    {v4['multi_turn']:>7.1%}" if v4["multi_turn"] is not None else "    Multi-Turn (30%):    N/A")
-    print(f"    Agentic (40%):       N/A (not yet implemented)")
+    print(f"    Agentic (40%):       N/A (see eval_full_v4.py)")
 
     weight_pct = v4["overall_weight_covered"] * 100
     if v4["overall"] is not None:
@@ -822,25 +658,30 @@ def main():
         help="Specific BFCL categories to evaluate",
     )
     parser.add_argument("--routing-only", action="store_true", default=False,
-                        help="Only evaluate Glyphh routing categories (Non-Live + Hallucination + Live)")
+                        help="Only evaluate routing categories (Non-Live + Hallucination + Live)")
     parser.add_argument("--full-v4", action="store_true", default=False,
-                        help="Run full V4 evaluation (needs LLM for multi-turn + agentic)")
+                        help="Run full V4 evaluation (routing + multi-turn)")
     parser.add_argument("--download-only", action="store_true",
                         help="Only download BFCL data, don't run eval")
     parser.add_argument("--max-entries", type=int, default=None,
                         help="Max entries per category (for quick testing)")
-    parser.add_argument("--threshold", type=float, default=0.15,
-                        help="Similarity threshold for routing")
+    parser.add_argument("--threshold", type=float, default=0.25,
+                        help="Confidence threshold for routing")
     parser.add_argument("--output", type=str, default=None,
                         help="Directory to save results JSON")
-    # LLM options (for multi-turn + arg extraction)
-    parser.add_argument("--llm-provider", type=str, default="anthropic",
-                        choices=["openai", "anthropic", "gemini"],
-                        help="LLM provider for routing disambiguation + multi-turn")
-    parser.add_argument("--llm-model", type=str, default="claude-haiku-4-5-20251001",
-                        help="LLM model name")
-    parser.add_argument("--cognitive", action="store_true",
-                        help="Use CognitiveLoop (LLM-free) for multi-turn eval")
+    # LLM options
+    parser.add_argument("--model-path", type=str, default=None,
+                        help="Path to GGUF model file (default: auto-discover)")
+    parser.add_argument("--n-ctx", type=int, default=4096,
+                        help="LLM context window size (default: 4096)")
+    parser.add_argument("--n-gpu-layers", type=int, default=-1,
+                        help="Number of GPU layers (-1=all, 0=CPU-only)")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Run without LLM (HDC keyword fallback only, no scorer)")
+    parser.add_argument("--hdc-only", action="store_true",
+                        help="Run HDC scorer only (no LLM, sub-ms per query)")
+    parser.add_argument("--no-scorer", action="store_true",
+                        help="Disable HDC model scorer (LLM-only mode)")
     args = parser.parse_args()
 
     # Determine categories to run
@@ -866,22 +707,46 @@ def main():
         print("Done.")
         return
 
-    handler = GlyphhBFCLHandler(threshold=args.threshold)
+    # Initialize LLMEngine
+    engine = None
+    skip_llm = args.no_llm or args.hdc_only
+    if not skip_llm:
+        try:
+            from glyphh.llm import LLMEngine
+            engine = LLMEngine(
+                model_path=args.model_path,
+                n_ctx=args.n_ctx,
+                n_gpu_layers=args.n_gpu_layers,
+            )
+            gpu_label = "CPU-only" if args.n_gpu_layers == 0 else f"GPU({args.n_gpu_layers})"
+            print(f"LLM: local LLMEngine (n_ctx={args.n_ctx}, {gpu_label}, lazy-load)")
+        except Exception as e:
+            print(f"LLMEngine init failed ({e}), running without LLM")
 
-    # Initialize LLM — used for multi-turn AND routing disambiguation (conf < LLM_FALLBACK_THRESHOLD)
-    llm = None
-    needs_llm = mt_cats or args.full_v4 or (args.categories and any(
-        c not in set(V4_MULTITURN_CATS) for c in (args.categories or [])
-    ))
-    try:
-        from llm_client import get_client
-        llm = get_client(args.llm_provider, args.llm_model)
-        print(f"LLM: {args.llm_provider}/{args.llm_model} (fallback threshold={LLM_FALLBACK_THRESHOLD})")
-    except Exception as e:
-        print(f"LLM init failed ({e}), running Glyphh routing-only")
+    # Determine scorer mode:
+    # --hdc-only:   use_scorer=True,  engine=None  (pure HDC, sub-ms)
+    # --no-scorer:  use_scorer=False, engine=...   (LLM-only, backward compat)
+    # --no-llm:     use_scorer=False, engine=None  (keyword fallback, legacy)
+    # default:      use_scorer=True,  engine=...   (full hybrid)
+    use_scorer = not args.no_scorer and not args.no_llm
+    if args.hdc_only:
+        use_scorer = True
+
+    handler = CognitiveBFCLHandler(
+        engine=engine,
+        confidence_threshold=args.threshold,
+        use_scorer=use_scorer,
+    )
+
+    mode = "hybrid (HDC + LLM)" if use_scorer and engine else \
+           "HDC-only" if use_scorer else \
+           "LLM-only" if engine else "keyword fallback"
 
     print(f"\nCategories: {categories}")
     print(f"Threshold: {args.threshold}")
+    print(f"Mode: {mode}")
+    print(f"LLM: {'local' if engine else 'disabled'}")
+    print(f"HDC Scorer: {'enabled' if use_scorer else 'disabled'}")
     print()
 
     category_results = []
@@ -889,11 +754,10 @@ def main():
         print(f"── {cat} ──")
         if cat in set(V4_MULTITURN_CATS):
             result = run_multi_turn_category(
-                handler, cat, llm=llm, max_entries=args.max_entries,
-                cognitive=args.cognitive,
+                cat, engine=engine, max_entries=args.max_entries,
             )
         else:
-            result = run_category(handler, cat, llm=llm, max_entries=args.max_entries)
+            result = run_category(handler, cat, max_entries=args.max_entries)
         if result:
             category_results.append(result)
 

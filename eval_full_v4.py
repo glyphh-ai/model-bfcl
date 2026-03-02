@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Full BFCL V4 evaluation — all categories, gpt-4.1, results saved to disk.
+Full BFCL V4 evaluation — all categories, local LLM, results saved to disk.
 
 V4 Overall = (Agentic × 40%) + (Multi-Turn × 30%) + (Live × 10%) + (Non-Live × 10%) + (Hallucination × 10%)
 
 Agentic = avg(web_search, memory)
+
+Uses CognitiveBFCLHandler (CognitiveLoop + SchemaIntentClassifier)
+backed by a local LLM (Qwen3-4B via llama-cpp-python).
 
 Saves per-category JSON + final V4 score to results/full_v4/
 
@@ -30,17 +33,13 @@ DATA_DIR = Path(__file__).parent / "data" / "bfcl"
 RESULTS_DIR = Path(__file__).parent / "results" / "full_v4"
 
 # ── Import handlers ──
-from handler import GlyphhBFCLHandler
+from cognitive_handler import CognitiveBFCLHandler
 from run_bfcl import (
     BFCL_FILES, BFCL_ANSWER_FILES,
     V4_NONLIVE_CATS, V4_HALLUCINATION_CATS, V4_LIVE_CATS, V4_MULTITURN_CATS,
     run_category, run_multi_turn_category,
     load_bfcl_file, _download_multi_turn_func_docs,
 )
-
-
-LLM_PROVIDER = "openai"
-LLM_MODEL = "gpt-4.1"
 
 
 def save_result(name: str, data: dict):
@@ -147,7 +146,7 @@ def run_memory_eval() -> dict:
 
 # ── Web search eval (needs LLM) ──
 
-def run_web_search_eval(max_entries: int | None = None) -> dict:
+def run_web_search_eval(engine=None, max_entries: int | None = None) -> dict:
     """Run BFCL V4 web search eval with Glyphh routing + structural verification."""
     from web_search_handler import WebSearchAgent
 
@@ -159,8 +158,8 @@ def run_web_search_eval(max_entries: int | None = None) -> dict:
     if max_entries:
         questions = questions[:max_entries]
 
-    agent = WebSearchAgent(provider=LLM_PROVIDER, model=LLM_MODEL)
-    print(f"    LLM: {LLM_PROVIDER}/{LLM_MODEL}")
+    agent = WebSearchAgent(engine=engine)
+    print(f"    LLM: local LLMEngine")
     print(f"    Questions: {len(questions)}")
 
     correct = 0
@@ -203,9 +202,9 @@ def run_web_search_eval(max_entries: int | None = None) -> dict:
 
         if hit:
             correct += 1
-            print(f"✓ ({elapsed:.1f}s)")
+            print(f"correct ({elapsed:.1f}s)")
         else:
-            print(f"✗ ({elapsed:.1f}s)")
+            print(f"wrong ({elapsed:.1f}s)")
 
         results.append({
             "id": qid, "correct": hit,
@@ -283,7 +282,7 @@ def compute_full_v4_score(results: dict[str, dict]) -> dict:
     scores["overall"] = overall_num / overall_denom if overall_denom > 0 else None
     scores["overall_weight_covered"] = overall_denom
     scores["timestamp"] = datetime.now().isoformat()
-    scores["llm_model"] = LLM_MODEL
+    scores["model"] = "glyphh (CognitiveLoop + local LLM)"
 
     return scores
 
@@ -301,18 +300,53 @@ def main():
                         help="Max web search questions (for testing)")
     parser.add_argument("--max-entries", type=int, default=None,
                         help="Max entries per category")
-    parser.add_argument("--threshold", type=float, default=0.15)
+    parser.add_argument("--threshold", type=float, default=0.25)
+    parser.add_argument("--model-path", type=str, default=None,
+                        help="Path to GGUF model file (default: auto-discover)")
+    parser.add_argument("--n-ctx", type=int, default=8192,
+                        help="LLM context window size (default: 8192)")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Run without LLM (keyword fallback, no scorer)")
+    parser.add_argument("--hdc-only", action="store_true",
+                        help="Run HDC scorer only (no LLM, sub-ms per query)")
+    parser.add_argument("--no-scorer", action="store_true",
+                        help="Disable HDC model scorer (LLM-only mode)")
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Initialize LLMEngine
+    engine = None
+    skip_llm = args.no_llm or args.hdc_only
+    if not skip_llm:
+        try:
+            from glyphh.llm import LLMEngine
+            engine = LLMEngine(model_path=args.model_path, n_ctx=args.n_ctx)
+        except Exception as e:
+            print(f"LLMEngine init failed ({e}), running without LLM")
+
+    # Determine scorer mode
+    use_scorer = not args.no_scorer and not args.no_llm
+    if args.hdc_only:
+        use_scorer = True
+
+    mode = "hybrid (HDC + LLM)" if use_scorer and engine else \
+           "HDC-only" if use_scorer else \
+           "LLM-only" if engine else "keyword fallback"
+
     print("=" * 70)
     print("  GLYPHH HDC — FULL BFCL V4 EVALUATION")
-    print(f"  LLM: {LLM_PROVIDER}/{LLM_MODEL}")
+    print(f"  Mode: {mode}")
+    print(f"  LLM: {'local LLMEngine' if engine else 'disabled'}")
+    print(f"  HDC Scorer: {'enabled' if use_scorer else 'disabled'}")
     print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 70)
 
-    handler = GlyphhBFCLHandler(threshold=args.threshold)
+    handler = CognitiveBFCLHandler(
+        engine=engine,
+        confidence_threshold=args.threshold,
+        use_scorer=use_scorer,
+    )
     all_results = {}
 
     # ── 1. Routing categories (Non-Live + Hallucination + Live) ──
@@ -322,7 +356,6 @@ def main():
         for cat in routing_cats:
             saved = load_result(cat)
             if not saved:
-                # Try old results dir
                 old_path = Path(__file__).parent / "results" / f"bfcl_{cat}.json"
                 if old_path.exists():
                     with open(old_path) as f:
@@ -362,15 +395,12 @@ def main():
     if not args.only or args.only == "multi_turn":
         print("\n── MULTI-TURN (30% of V4) ──")
         _download_multi_turn_func_docs()
-
-        from llm_client import get_client
-        llm = get_client(LLM_PROVIDER, LLM_MODEL)
-        print(f"  LLM: {LLM_PROVIDER}/{LLM_MODEL}")
+        print(f"  LLM: {llm_label}")
 
         for cat in V4_MULTITURN_CATS:
             print(f"\n  {cat}:")
             result = run_multi_turn_category(
-                handler, cat, llm=llm, max_entries=args.max_entries,
+                cat, engine=engine, max_entries=args.max_entries,
             )
             if result:
                 all_results[cat] = result
@@ -401,7 +431,7 @@ def main():
     # ── 4. Agentic — Web Search ──
     if not args.only or args.only in ("agentic", "web_search"):
         print("\n── AGENTIC: WEB SEARCH ──")
-        result = run_web_search_eval(max_entries=args.max_web)
+        result = run_web_search_eval(engine=engine, max_entries=args.max_web)
         all_results["web_search"] = result
         save_result("web_search", result)
         print(f"  web_search: {result['accuracy']:.1%} ({result['correct']}/{result['total']})")
@@ -464,7 +494,7 @@ def main():
             for cat, r in all_results.items()
         },
         "timestamp": datetime.now().isoformat(),
-        "llm_model": LLM_MODEL,
+        "model": "glyphh (CognitiveLoop + local LLM)",
     }
     save_result("summary", summary)
 
