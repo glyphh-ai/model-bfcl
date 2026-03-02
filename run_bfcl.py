@@ -529,11 +529,14 @@ def run_multi_turn_category(
     category: str,
     llm=None,
     max_entries: int | None = None,
+    cognitive: bool = False,
 ) -> dict:
     """Run evaluation on a multi-turn BFCL category.
 
     Glyphh routes each turn. LLM extracts args (if provided).
     Scoring is per-entry: all turns must have correct routing.
+
+    If cognitive=True, uses CognitiveLoop (LLM-free) instead of the 6-model + LLM pipeline.
     """
     from multi_turn_handler import (
         get_available_functions,
@@ -564,6 +567,10 @@ def run_multi_turn_category(
             for ae in load_bfcl_file(answer_path):
                 answers[ae.get("id", "")] = ae
 
+    # Import cognitive eval if needed
+    if cognitive:
+        from multi_turn_handler import eval_multi_turn_entry_cognitive
+
     results = []
     correct = 0
     total = 0
@@ -582,7 +589,10 @@ def run_multi_turn_category(
         total += 1
         start = time.perf_counter()
 
-        result = eval_multi_turn_entry(handler, llm, entry, ground_truth)
+        if cognitive:
+            result = eval_multi_turn_entry_cognitive(entry, ground_truth)
+        else:
+            result = eval_multi_turn_entry(handler, llm, entry, ground_truth)
         elapsed_ms = (time.perf_counter() - start) * 1000
         total_latency += elapsed_ms
 
@@ -829,6 +839,8 @@ def main():
                         help="LLM provider for routing disambiguation + multi-turn")
     parser.add_argument("--llm-model", type=str, default="claude-haiku-4-5-20251001",
                         help="LLM model name")
+    parser.add_argument("--cognitive", action="store_true",
+                        help="Use CognitiveLoop (LLM-free) for multi-turn eval")
     args = parser.parse_args()
 
     # Determine categories to run
@@ -878,6 +890,7 @@ def main():
         if cat in set(V4_MULTITURN_CATS):
             result = run_multi_turn_category(
                 handler, cat, llm=llm, max_entries=args.max_entries,
+                cognitive=args.cognitive,
             )
         else:
             result = run_category(handler, cat, llm=llm, max_entries=args.max_entries)

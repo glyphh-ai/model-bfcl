@@ -47,6 +47,7 @@ from glyphh.core.config import EncoderConfig, Layer, Segment, Role, TemporalConf
 from glyphh.core.types import Concept
 from glyphh.core.ops import cosine_similarity
 from glyphh.temporal import BeamSearchPredictor
+from glyphh.cognitive import CognitiveLoop, DomainConfig
 
 from handler import GlyphhBFCLHandler
 from llm_client import get_client
@@ -515,7 +516,7 @@ def eval_multi_turn_entry(
             # DeductiveLayer: detect implicit prerequisites via HDC mismatch
             deduction = deductive.deduce(query, current_state=state_tracker.get_cwd())
             if deduction["prerequisites"]:
-                print(f"  [DED] {entry_id} T{turn_idx}: prereqs={deduction['prerequisites']} "
+                print(f"  [DED] {entry.get('id', '?')} T{turn_idx}: prereqs={deduction['prerequisites']} "
                       f"conf={deduction['confidence']:.3f} mismatch={deduction['mismatch_score']}")
                 for prereq in deduction["prerequisites"]:
                     boost = min(0.40, deduction["confidence"] * 0.55)
@@ -996,3 +997,194 @@ def _llm_select_and_call(
         return result
     except Exception:
         return {}
+
+
+# ── Cognitive Loop path (LLM-free) ──
+
+# Domain config — loaded once, shared across all entries
+_DOMAIN_CONFIG_PATH = Path(__file__).parent / "domain" / "gorilla_file_system.json"
+_domain_config: DomainConfig | None = None
+
+
+def _get_domain_config() -> DomainConfig:
+    global _domain_config
+    if _domain_config is None:
+        _domain_config = DomainConfig.from_file(_DOMAIN_CONFIG_PATH)
+    return _domain_config
+
+
+def normalize_gfs_state(initial_config: dict) -> dict:
+    """Convert GorillaFileSystem initial_config to normalized state dict.
+
+    Returns {primary, collections, _tree} for CognitiveLoop.begin().
+    This is model-side parsing — the SDK doesn't know GorillaFileSystem.
+    """
+    gfs = initial_config.get("GorillaFileSystem", {})
+    root = gfs.get("root", {})
+    if not root:
+        return {"primary": "/", "collections": {}, "_tree": {}}
+
+    tree: dict[str, dict] = {}
+
+    def _walk(path: str, node: dict) -> None:
+        if not isinstance(node, dict) or node.get("type") != "directory":
+            return
+        contents = node.get("contents", {})
+        files = []
+        dirs = []
+        for name, child in contents.items():
+            if isinstance(child, dict):
+                if child.get("type") == "file":
+                    files.append(name)
+                elif child.get("type") == "directory":
+                    dirs.append(name)
+                    _walk(path.rstrip("/") + "/" + name, child)
+        tree[path] = {"files_here": files, "dirs_here": dirs}
+
+    root_name = list(root.keys())[0] if root else "root"
+    _walk("/" + root_name, root.get(root_name, {}))
+    primary = "/" + root_name
+
+    initial_collections = dict(tree.get(primary, {}))
+
+    return {
+        "primary": primary,
+        "collections": initial_collections,
+        "_tree": tree,
+    }
+
+
+def eval_multi_turn_entry_cognitive(
+    entry: dict,
+    ground_truth: list,
+) -> dict:
+    """Evaluate a multi-turn entry using CognitiveLoop (no LLM).
+
+    The CognitiveLoop handles everything:
+      - Intent extraction (perceive)
+      - Episodic recall (remember)
+      - Deductive reasoning (prerequisite detection)
+      - Slot extraction (argument filling)
+      - Confidence gating (ASK vs CALL)
+      - Hebbian reinforcement (learn from outcomes)
+    """
+    turns = entry.get("question", [])
+    available_funcs = get_available_functions(entry)
+
+    if not available_funcs:
+        return {
+            "id": entry.get("id", "?"),
+            "turns": len(turns),
+            "correct_turns": 0,
+            "total_turns": len(turns),
+            "correct": False,
+            "details": [],
+        }
+
+    config = _get_domain_config()
+    loop = CognitiveLoop(
+        packs=["filesystem"],
+        domain_config=config,
+    )
+
+    # Parse initial state and start the loop
+    initial_state = normalize_gfs_state(entry.get("initial_config", {}))
+    loop.begin(functions=available_funcs, initial_state=initial_state)
+
+    # Also maintain the legacy state tracker for query_mentions_child hints
+    state_tracker = ConversationStateTracker()
+    state_tracker.init_from_config(entry.get("initial_config", {}))
+
+    turn_results = []
+    correct_turns = 0
+
+    for turn_idx, turn in enumerate(turns):
+        query = extract_turn_query(turn)
+
+        # Get expected for this turn
+        expected_step = ground_truth[turn_idx] if turn_idx < len(ground_truth) else []
+        expected_calls = parse_ground_truth_step(expected_step)
+
+        if not query:
+            # Empty turn
+            if not expected_calls:
+                turn_results.append({
+                    "turn": turn_idx,
+                    "correct": True,
+                    "expected": [],
+                    "predicted": [],
+                    "reason": "empty_turn_no_call",
+                })
+                correct_turns += 1
+            else:
+                turn_results.append({
+                    "turn": turn_idx,
+                    "correct": False,
+                    "expected_funcs": sorted(set(
+                        k for c in expected_calls for k in c.keys()
+                    )),
+                    "predicted_funcs": [],
+                    "reason": "empty_turn_with_expected_calls",
+                })
+            continue
+
+        # Inject state tracker hints into the cognitive loop's state
+        state_hint = state_tracker.get_state_hint(query)
+        loop._state["query_mentions_child"] = state_hint.get("query_mentions_child")
+        loop._state["query_mentions_other_dir"] = state_hint.get("query_mentions_other_dir")
+
+        # Run the cognitive loop
+        result = loop.step(query)
+
+        # Extract predicted function names
+        predicted_funcs = set()
+        predicted_dict: dict[str, dict] = {}
+        if result.action == "CALL":
+            for call in result.calls:
+                for fname, args in call.items():
+                    predicted_funcs.add(fname)
+                    predicted_dict[fname] = args
+
+        # Extract expected function names
+        expected_funcs = set()
+        for call in expected_calls:
+            expected_funcs.update(call.keys())
+
+        # Score this turn
+        if not expected_calls:
+            func_correct = len(predicted_funcs) == 0
+        else:
+            func_correct = predicted_funcs == expected_funcs
+
+        # Update state tracker from prediction (for next turn hints)
+        state_tracker.update_from_prediction(predicted_dict)
+
+        # Hebbian reinforcement
+        loop.confirm(
+            was_correct=func_correct,
+            correct_outcome=expected_calls if not func_correct else None,
+        )
+
+        turn_results.append({
+            "turn": turn_idx,
+            "correct": func_correct,
+            "expected_funcs": sorted(expected_funcs),
+            "predicted_funcs": sorted(predicted_funcs),
+            "confidence": result.confidence,
+            "action": result.action,
+            "mode": "cognitive",
+        })
+
+        if func_correct:
+            correct_turns += 1
+
+    loop.end()
+
+    return {
+        "id": entry.get("id", "?"),
+        "turns": len(turns),
+        "correct_turns": correct_turns,
+        "total_turns": len(turn_results),
+        "correct": correct_turns == len(turn_results),
+        "details": turn_results,
+    }
