@@ -22,140 +22,23 @@ from glyphh.cognitive.model_scorer import ScorerResult
 from encoder import ENCODER_CONFIG, encode_function, encode_query
 
 
-class BFCLModelScorer:
-    """HDC model scorer for BFCL function routing.
+class BFCLScoringStrategy:
+    """BFCL's 4-level hierarchical scoring as a ScoringStrategy.
 
-    Encodes function definitions and queries using the BFCL encoder
-    (10000-dim, seed=42, two-layer hierarchy) and scores via
-    hierarchical cosine similarity.
-
-    Implements the ModelScorer protocol:
-        scorer.configure(func_defs)
-        scorer.score(query) → ScorerResult
-        scorer.score_multi(query) → ScorerResult
+    Four levels with weights:
+      cortex  (5%)  — global cortex
+      layer   (10%) — per-layer cortex average
+      segment (25%) — per-segment cortex average
+      role    (60%) — per-role average (leaf level)
     """
 
-    # Hierarchical similarity weights
-    _W_CORTEX = 0.05    # Global cortex
-    _W_LAYER = 0.10     # Per-layer cortex
-    _W_SEGMENT = 0.25   # Per-segment cortex
-    _W_ROLE = 0.60      # Per-role (leaf level)
+    _W_CORTEX = 0.05
+    _W_LAYER = 0.10
+    _W_SEGMENT = 0.25
+    _W_ROLE = 0.60
 
-    # Irrelevance threshold
-    _IRRELEVANCE_THRESHOLD = 0.20
-
-    # Multi-function selection
-    _MULTI_GAP_RATIO = 0.60      # Relative gap > 60% → single function
-    _MULTI_FALLBACK_RATIO = 0.45  # Absolute ratio < 45% → single function
-
-    def __init__(self):
-        self._encoder = Encoder(ENCODER_CONFIG)
-        self._func_glyphs: dict[str, Glyph] = {}
-        self._func_defs: dict[str, dict] = {}
-
-    def configure(self, func_defs: list[dict[str, Any]]) -> None:
-        """Encode function definitions into Glyphs."""
-        self._func_glyphs.clear()
-        self._func_defs = {f["name"]: f for f in func_defs}
-
-        for func_def in func_defs:
-            concept_dict = encode_function(func_def)
-            concept = Concept(
-                name=concept_dict["name"],
-                attributes=concept_dict["attributes"],
-            )
-            glyph = self._encoder.encode(concept)
-            self._func_glyphs[func_def["name"]] = glyph
-
-    def score(self, query: str) -> ScorerResult:
-        """Score a query against configured functions. Returns best match."""
-        if not self._func_glyphs:
-            return ScorerResult()
-
-        query_dict = encode_query(query)
-        query_concept = Concept(
-            name=query_dict["name"],
-            attributes=query_dict["attributes"],
-        )
-        query_glyph = self._encoder.encode(query_concept)
-
-        # Score against all functions
-        scores = []
-        for fname, fglyph in self._func_glyphs.items():
-            sim = self._hierarchical_similarity(query_glyph, fglyph)
-            scores.append({"function": fname, "score": sim})
-
-        scores.sort(key=lambda x: x["score"], reverse=True)
-
-        # Check irrelevance
-        if self._is_irrelevant(query_glyph, scores):
-            return ScorerResult(
-                confidence=scores[0]["score"] if scores else 0.0,
-                all_scores=scores,
-                is_irrelevant=True,
-            )
-
-        # Best match
-        best = scores[0] if scores else {"function": "", "score": 0.0}
-        return ScorerResult(
-            functions=[best["function"]] if best["function"] else [],
-            confidence=best["score"],
-            all_scores=scores,
-        )
-
-    def score_multi(self, query: str) -> ScorerResult:
-        """Score for multiple matching functions using gap analysis."""
-        if not self._func_glyphs:
-            return ScorerResult()
-
-        query_dict = encode_query(query)
-        query_concept = Concept(
-            name=query_dict["name"],
-            attributes=query_dict["attributes"],
-        )
-        query_glyph = self._encoder.encode(query_concept)
-
-        # Score against all functions
-        scores = []
-        for fname, fglyph in self._func_glyphs.items():
-            sim = self._hierarchical_similarity(query_glyph, fglyph)
-            scores.append({"function": fname, "score": sim})
-
-        scores.sort(key=lambda x: x["score"], reverse=True)
-
-        # Check irrelevance
-        if self._is_irrelevant(query_glyph, scores):
-            return ScorerResult(
-                confidence=scores[0]["score"] if scores else 0.0,
-                all_scores=scores,
-                is_irrelevant=True,
-            )
-
-        # Select multiple functions via gap analysis
-        selected = self._select_multiple(scores)
-
-        avg_confidence = (
-            sum(s["score"] for s in scores if s["function"] in selected) / len(selected)
-            if selected else 0.0
-        )
-
-        return ScorerResult(
-            functions=selected,
-            confidence=avg_confidence,
-            all_scores=scores,
-        )
-
-    # ── Hierarchical similarity ──────────────────────────────────────────
-
-    def _hierarchical_similarity(self, q: Glyph, f: Glyph) -> float:
-        """Compute weighted hierarchical similarity between two Glyphs.
-
-        Four levels:
-          cortex  (5%)  — global cortex
-          layer   (10%) — per-layer cortex average
-          segment (25%) — per-segment cortex average
-          role    (60%) — per-role average (leaf level)
-        """
+    def score_pair(self, q: Glyph, f: Glyph) -> float:
+        """Compute weighted hierarchical similarity between two Glyphs."""
         # Global cortex
         cortex_sim = float(cosine_similarity(
             q.global_cortex.data, f.global_cortex.data,
@@ -202,6 +85,139 @@ class BFCLModelScorer:
             + self._W_LAYER * layer_sim
             + self._W_SEGMENT * seg_sim
             + self._W_ROLE * role_sim
+        )
+
+
+class BFCLModelScorer:
+    """HDC model scorer for BFCL function routing.
+
+    Encodes function definitions and queries using the BFCL encoder
+    (10000-dim, seed=42, two-layer hierarchy) and scores via
+    hierarchical cosine similarity.
+
+    Implements the ModelScorer protocol:
+        scorer.configure(func_defs)
+        scorer.score(query) → ScorerResult
+        scorer.score_multi(query) → ScorerResult
+        scorer.encode_query(query) → Glyph
+        scorer.get_func_glyphs() → dict[str, Glyph]
+        scorer.scoring_strategy() → BFCLScoringStrategy
+    """
+
+    # Irrelevance threshold
+    _IRRELEVANCE_THRESHOLD = 0.20
+
+    # Multi-function selection
+    _MULTI_GAP_RATIO = 0.60      # Relative gap > 60% → single function
+    _MULTI_FALLBACK_RATIO = 0.45  # Absolute ratio < 45% → single function
+
+    def __init__(self):
+        self._encoder = Encoder(ENCODER_CONFIG)
+        self._scoring = BFCLScoringStrategy()
+        self._func_glyphs: dict[str, Glyph] = {}
+        self._func_defs: dict[str, dict] = {}
+
+    def configure(self, func_defs: list[dict[str, Any]]) -> None:
+        """Encode function definitions into Glyphs."""
+        self._func_glyphs.clear()
+        self._func_defs = {f["name"]: f for f in func_defs}
+
+        for func_def in func_defs:
+            concept_dict = encode_function(func_def)
+            concept = Concept(
+                name=concept_dict["name"],
+                attributes=concept_dict["attributes"],
+            )
+            glyph = self._encoder.encode(concept)
+            self._func_glyphs[func_def["name"]] = glyph
+
+    # ── New protocol methods for GlyphSpace ────────────────────────────────
+
+    def encode_query(self, query: str) -> Glyph:
+        """Encode a query into a Glyph in the BFCL vector space."""
+        query_dict = encode_query(query)
+        query_concept = Concept(
+            name=query_dict["name"],
+            attributes=query_dict["attributes"],
+        )
+        return self._encoder.encode(query_concept)
+
+    def get_func_glyphs(self) -> dict[str, Glyph]:
+        """Return the encoded function Glyphs (after configure())."""
+        return dict(self._func_glyphs)
+
+    def scoring_strategy(self) -> BFCLScoringStrategy:
+        """Return BFCL's hierarchical scoring strategy."""
+        return self._scoring
+
+    # ── Existing scoring methods ─────────────────────────────────────────
+
+    def score(self, query: str) -> ScorerResult:
+        """Score a query against configured functions. Returns best match."""
+        if not self._func_glyphs:
+            return ScorerResult()
+
+        query_glyph = self.encode_query(query)
+
+        # Score against all functions
+        scores = []
+        for fname, fglyph in self._func_glyphs.items():
+            sim = self._scoring.score_pair(query_glyph, fglyph)
+            scores.append({"function": fname, "score": sim})
+
+        scores.sort(key=lambda x: x["score"], reverse=True)
+
+        # Check irrelevance
+        if self._is_irrelevant(query_glyph, scores):
+            return ScorerResult(
+                confidence=scores[0]["score"] if scores else 0.0,
+                all_scores=scores,
+                is_irrelevant=True,
+            )
+
+        # Best match
+        best = scores[0] if scores else {"function": "", "score": 0.0}
+        return ScorerResult(
+            functions=[best["function"]] if best["function"] else [],
+            confidence=best["score"],
+            all_scores=scores,
+        )
+
+    def score_multi(self, query: str) -> ScorerResult:
+        """Score for multiple matching functions using gap analysis."""
+        if not self._func_glyphs:
+            return ScorerResult()
+
+        query_glyph = self.encode_query(query)
+
+        # Score against all functions
+        scores = []
+        for fname, fglyph in self._func_glyphs.items():
+            sim = self._scoring.score_pair(query_glyph, fglyph)
+            scores.append({"function": fname, "score": sim})
+
+        scores.sort(key=lambda x: x["score"], reverse=True)
+
+        # Check irrelevance
+        if self._is_irrelevant(query_glyph, scores):
+            return ScorerResult(
+                confidence=scores[0]["score"] if scores else 0.0,
+                all_scores=scores,
+                is_irrelevant=True,
+            )
+
+        # Select multiple functions via gap analysis
+        selected = self._select_multiple(scores)
+
+        avg_confidence = (
+            sum(s["score"] for s in scores if s["function"] in selected) / len(selected)
+            if selected else 0.0
+        )
+
+        return ScorerResult(
+            functions=selected,
+            confidence=avg_confidence,
+            all_scores=scores,
         )
 
     # ── Irrelevance detection ────────────────────────────────────────────

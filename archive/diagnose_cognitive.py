@@ -2,7 +2,7 @@
 
 Runs entries and shows detailed per-turn breakdown:
   - Query text
-  - IntentExtractor output (action, target, domain)
+  - Extracted action (from encoder._extract_action)
   - Resolved functions
   - Multi-action keyword matches
   - Expected vs predicted
@@ -24,7 +24,7 @@ from multi_turn_handler import (
 )
 from run_bfcl import load_bfcl_file, DATA_DIR, BFCL_FILES, BFCL_ANSWER_FILES
 from glyphh.cognitive import CognitiveLoop, DomainConfig
-from glyphh.intent import IntentExtractor
+from encoder import _extract_action
 import re
 
 
@@ -42,8 +42,6 @@ def diagnose(max_entries=10):
         entry_id = entry.get("id", "")
         ae = answer_map.get(entry_id, {})
         answers.append(ae.get("ground_truth", []))
-
-    extractor = IntentExtractor(packs=["filesystem"])
 
     total_turns = 0
     correct_turns = 0
@@ -92,11 +90,8 @@ def diagnose(max_entries=10):
                     correct_turns += 1
                 continue
 
-            # Get intent
-            intent = extractor.extract(query)
-            action = intent.get("action", "")
-            target = intent.get("target", "")
-            domain = intent.get("domain", "")
+            # Get action from BFCL's own extraction
+            action = _extract_action(query)
 
             # Inject state hints
             state_hint = state_tracker.get_state_hint(query)
@@ -148,7 +143,7 @@ def diagnose(max_entries=10):
 
                 print(f"\n  [{idx}] turn {turn_idx}: FAIL")
                 print(f"    query: {query[:120]}")
-                print(f"    intent: action={action!r} target={target!r} domain={domain!r}")
+                print(f"    action: {action!r}")
                 print(f"    mapped_func: {mapped_func!r}")
                 print(f"    keyword_matches: {matched_keywords}")
                 print(f"    expected: {sorted(expected_funcs)}")
