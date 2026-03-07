@@ -36,6 +36,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from handler import BFCLHandler
+from extractor import ArgumentExtractor
 from memory import MemoryHandler
 
 DATA_DIR    = Path(__file__).parent / "data" / "bfcl"
@@ -107,6 +108,20 @@ DEFAULT_CATS      = ["simple", "multiple", "parallel", "parallel_multiple", "irr
 # Memory prereq conversation files
 MEMORY_PREREQ_DIR = DATA_DIR / "memory_prereq_conversation"
 MEMORY_SCENARIOS  = ["customer", "healthcare", "finance", "student", "notetaker"]
+
+# ── Gorilla leaderboard output mapping ────────────────────────────────────
+
+GORILLA_GROUPS = {
+    "simple": "non_live", "java": "non_live", "javascript": "non_live",
+    "multiple": "non_live", "parallel": "non_live", "parallel_multiple": "non_live",
+    "irrelevance": "non_live",
+    "live_simple": "live", "live_multiple": "live",
+    "live_parallel": "live", "live_parallel_multiple": "live",
+    "live_irrelevance": "live",
+    "multi_turn_base": "multi_turn", "multi_turn_miss_func": "multi_turn",
+    "multi_turn_miss_param": "multi_turn", "multi_turn_long_context": "multi_turn",
+    "memory_kv": "agentic", "memory_vector": "agentic", "memory_rec_sum": "agentic",
+}
 
 # Multi-turn function doc loading
 FUNC_DOC_DIR = DATA_DIR / "multi_turn_func_doc"
@@ -318,6 +333,7 @@ def _eval_single(
     r         = handler.route(query, func_defs, force=force)
     predicted = r["tool"]
     correct   = predicted == expected if expected is not None else False
+    gorilla   = json.dumps([{predicted: r.get("args", {})}]) if predicted else ""
     return {
         "id":         entry_id,
         "query":      query[:100],
@@ -327,6 +343,7 @@ def _eval_single(
         "correct":    correct,
         "latency_ms": r["latency_ms"],
         "top_k":      r["top_k"],
+        "gorilla_result": gorilla,
     }
 
 
@@ -341,6 +358,10 @@ def _eval_multi(
     r              = handler.route_multi(query, func_defs, force=force)
     predicted_set  = set(r["tools"])
     correct        = predicted_set == expected if expected is not None else False
+    gorilla = (
+        json.dumps([{f: r["args"].get(f, {})} for f in r["tools"]])
+        if r["tools"] else ""
+    )
     return {
         "id":         entry_id,
         "query":      query[:100],
@@ -350,6 +371,7 @@ def _eval_multi(
         "correct":    correct,
         "latency_ms": r["latency_ms"],
         "top_k":      r["top_k"],
+        "gorilla_result": gorilla,
     }
 
 
@@ -360,6 +382,12 @@ def _eval_irrelevance(
     entry_id: str,
 ) -> dict:
     is_irr, r = handler.is_irrelevant(query, func_defs)
+    if is_irr:
+        gorilla = ""
+    elif r["tool"]:
+        gorilla = json.dumps([{r["tool"]: r.get("args", {})}])
+    else:
+        gorilla = ""
     return {
         "id":         entry_id,
         "query":      query[:100],
@@ -369,6 +397,7 @@ def _eval_irrelevance(
         "correct":    is_irr,
         "latency_ms": r["latency_ms"],
         "top_k":      r["top_k"],
+        "gorilla_result": gorilla,
     }
 
 
@@ -496,6 +525,30 @@ def _eval_multi_turn(
 
     path_accuracy = correct / len(expected_path) if expected_path else 1.0
 
+    # Build gorilla result: list[list[str]] with arg extraction per turn
+    extractor = ArgumentExtractor()
+    turns = entry.get("question", [])
+    gorilla_turns: list[list[str]] = []
+    for i, turn_result in enumerate(result["per_turn"]):
+        funcs = turn_result["functions"]
+        if not funcs:
+            gorilla_turns.append([])
+            continue
+        # Extract query for this turn
+        query = ""
+        if i < len(turns) and turns[i]:
+            for msg in reversed(turns[i]):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    query = msg.get("content", "")
+                    break
+        # Build function calls with extracted args
+        calls = []
+        for fname in funcs:
+            fdef = next((f for f in func_defs if f["name"] == fname), None)
+            args = extractor.extract(query, fdef) if fdef and query else {}
+            calls.append({fname: args})
+        gorilla_turns.append([json.dumps(calls)])
+
     return {
         "id":            entry_id,
         "expected_path": expected_path,
@@ -505,6 +558,7 @@ def _eval_multi_turn(
         "latency_ms":    result["latency_ms"],
         "path_correct":  correct,
         "path_total":    len(expected_path),
+        "gorilla_result": gorilla_turns,
     }
 
 
@@ -613,6 +667,7 @@ def run_memory_category(
             "response":     response[:200],
             "ground_truth": ground_truths,
             "correct":      is_correct,
+            "gorilla_result": response,
         })
 
     print()
@@ -785,6 +840,58 @@ def print_report(category_results: list[dict]) -> None:
     print("  " + "=" * (len(hdr) - 2))
 
 
+# ── Gorilla leaderboard output ────────────────────────────────────────────
+
+def _gorilla_result_filename(category: str) -> str:
+    """Map our category name to gorilla result filename.
+
+    Gorilla uses BFCL_v4_{test_category}_result.json where test_category
+    matches category_mapping.py names. Memory categories need special handling
+    because they share the same source data file but get separate result files.
+    """
+    # Memory categories: gorilla expects separate files per backend
+    if category in MEMORY_CATS:
+        return f"BFCL_v4_{category}_result.json"
+    # All others: derive from the source data filename
+    bfcl_name = BFCL_FILES.get(category, "")
+    return bfcl_name.replace(".json", "_result.json") if bfcl_name else ""
+
+
+def write_gorilla_output(category_results: list[dict], output_dir: str) -> None:
+    """Write gorilla-format JSONL result files for leaderboard submission.
+
+    Produces result/<model>/<group>/BFCL_v4_<category>_result.json files
+    compatible with the gorilla eval framework.
+    """
+    out = Path(output_dir)
+    print(f"\nWriting gorilla results to {out}/")
+
+    for cr in category_results:
+        cat = cr["category"]
+        group = GORILLA_GROUPS.get(cat)
+        if not group:
+            continue
+
+        result_name = _gorilla_result_filename(cat)
+        if not result_name:
+            continue
+
+        group_dir = out / group
+        group_dir.mkdir(parents=True, exist_ok=True)
+
+        fpath = group_dir / result_name
+        with open(fpath, "w") as f:
+            for entry in cr["results"]:
+                gorilla_entry = {
+                    "id": entry["id"],
+                    "result": entry.get("gorilla_result", ""),
+                }
+                f.write(json.dumps(gorilla_entry) + "\n")
+        print(f"  {result_name:<50} {len(cr['results']):>4} entries")
+
+    print("Done.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -823,6 +930,10 @@ def main() -> None:
     parser.add_argument(
         "--output", type=str, default=None,
         help="Directory to save results JSON",
+    )
+    parser.add_argument(
+        "--output-gorilla", type=str, default=None,
+        help="Directory to save gorilla-format JSONL result files for leaderboard submission",
     )
     args = parser.parse_args()
 
@@ -886,6 +997,9 @@ def main() -> None:
         with open(out_dir / "bfcl_v4_score.json", "w") as f:
             json.dump(compute_v4_score(cr_map), f, indent=2)
         print(f"\nResults saved to {out_dir}/")
+
+    if args.output_gorilla:
+        write_gorilla_output(category_results, args.output_gorilla)
 
 
 if __name__ == "__main__":

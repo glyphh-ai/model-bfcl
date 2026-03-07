@@ -1,130 +1,114 @@
 """
 Gorilla-compatible handler for BFCL leaderboard submission.
 
-Wraps BFCLHandler to produce decode_ast / decode_execute outputs
-matching the gorilla evaluation framework's expected interface.
+Decodes pre-computed result files into AST/execute formats expected
+by the gorilla eval framework. Pure HDC model — no LLM API calls.
 
-No LLM calls — pure HDC routing + CognitiveLoop + rule-based arg extraction.
+Result format by category:
+  Single-turn (AST):  result = '[{"func_name": {"param": "val"}}]'  (JSON string)
+  Irrelevance:        result = ''  (empty string → no function call)
+  Multi-turn:         result = [["[{...}]"], ["[{...}]"]]  (list[list[str]])
+  Memory (agentic):   result = 'retrieved text...'  (plain text)
 
 Integration:
-  1. Copy this file into the gorilla repo's model_handler/ directory
+  1. Copy this file into gorilla repo's model_handler/api_inference/ directory
   2. Register in model_config.py as a ModelConfig entry
   3. Add to SUPPORTED_MODELS
+  4. Place result files in result/glyphh-hdc-v1/<group>/
 
 See: https://github.com/ShishirPatil/gorilla/blob/main/berkeley-function-call-leaderboard/CONTRIBUTING.md
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from handler import BFCLHandler
-from run_bfcl import load_multi_turn_func_defs
 
+class GlyphhHDCHandler:
+    """Gorilla-compatible handler for Glyphh HDC model.
 
-class GlyphhBFCLHandler:
-    """Gorilla-compatible handler. Pure HDC + CognitiveLoop, no LLM."""
+    Decodes pre-computed results — no inference (pure HDC, not an LLM).
+    Only decode_ast() and decode_execute() are needed for evaluation.
+    """
 
-    def __init__(self, confidence_threshold: float = 0.22) -> None:
-        self.handler = BFCLHandler(confidence_threshold=confidence_threshold)
-
-    # ── Inference ─────────────────────────────────────────────────────────
-
-    def inference_single_turn(
-        self,
-        question: list[list[dict]],
-        func_defs: list[dict],
-    ) -> dict[str, Any]:
-        """Process a single-turn query. Returns raw route result."""
-        query = self._extract_query(question)
-        return self.handler.route(query, func_defs, force=True)
-
-    def inference_multi_turn(
-        self,
-        question: list[list[dict]],
-        func_defs: list[dict],
-        initial_config: dict | None = None,
-        involved_classes: list[str] | None = None,
-        excluded_function: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """Process a multi-turn query. Returns per-turn routing results."""
-        # If func_defs not pre-loaded, load from multi_turn_func_doc/
-        if not func_defs and involved_classes:
-            func_defs = load_multi_turn_func_defs(
-                involved_classes, excluded_function or [],
-            )
-
-        entry = {
-            "question": question,
-            "initial_config": initial_config or {},
-        }
-        return self.handler.route_multi_turn(entry, func_defs)
+    def __init__(self, **kwargs: Any) -> None:
+        pass
 
     # ── Decode: AST format ────────────────────────────────────────────────
 
     def decode_ast(
         self,
-        result: dict[str, Any],
+        result: Any,
         language: str = "Python",
         has_tool_call_tag: bool = False,
-    ) -> list[dict] | list[list[dict]]:
-        """Convert result to AST format: [{"func_name": {"param": val}}]
+    ) -> list[dict]:
+        """Convert result to AST format: [{"func_name": {"param": val}}].
 
-        For multi-turn results (per_turn key present), returns a list of
-        per-turn AST lists.
+        Handles:
+          - JSON string: parse into list of function call dicts
+          - Already a list: return as-is
+          - Empty/unparseable: return [] (treated as "no function call")
         """
-        if "per_turn" in result:
-            # Multi-turn: list of per-turn call lists
-            all_turns = []
-            for turn in result["per_turn"]:
-                calls = []
-                for func in turn.get("functions", []):
-                    calls.append({func: {}})
-                all_turns.append(calls)
-            return all_turns
+        if isinstance(result, list):
+            return result
 
-        # Single-turn
-        if result.get("tool"):
-            return [{result["tool"]: result.get("args", {})}]
-        return []
+        if not isinstance(result, str) or not result.strip():
+            return []
+
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, list):
+                return parsed
+            return []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     # ── Decode: Execute format ────────────────────────────────────────────
 
     def decode_execute(
         self,
-        result: dict[str, Any],
+        result: Any,
         has_tool_call_tag: bool = False,
-    ) -> list[str] | list[list[str]]:
-        """Convert result to execute format: ["func_name(param=val, ...)"]
+    ) -> list[str]:
+        """Convert result to execute format: ["func_name(param=val, ...)"].
 
-        For multi-turn results, returns a list of per-turn call string lists.
+        Handles:
+          - JSON string of [{func: {args}}] → ["func(k=v, ...)"]
+          - Already a list of strings: return as-is
+          - Empty/unparseable: return []
         """
-        if "per_turn" in result:
-            all_turns = []
-            for turn in result["per_turn"]:
-                calls = []
-                for func in turn.get("functions", []):
-                    calls.append(f"{func}()")
-                all_turns.append(calls)
-            return all_turns
+        if isinstance(result, list):
+            # Already decoded (e.g. list of executable strings)
+            if all(isinstance(s, str) for s in result):
+                return result
+            # List of dicts — convert to executable strings
+            return self._dicts_to_exec(result)
 
-        # Single-turn
-        if result.get("tool"):
-            args = result.get("args", {})
-            args_str = ", ".join(f"{k}={repr(v)}" for k, v in args.items())
-            return [f"{result['tool']}({args_str})"]
-        return []
+        if not isinstance(result, str) or not result.strip():
+            return []
+
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, list):
+                return self._dicts_to_exec(parsed)
+            return []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def _extract_query(question: list[list[dict]]) -> str:
-        """Extract the user query from gorilla question format."""
-        for turn in question:
-            if isinstance(turn, list):
-                for msg in reversed(turn):
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        return msg.get("content", "")
-            elif isinstance(turn, dict) and turn.get("role") == "user":
-                return turn.get("content", "")
-        return ""
+    def _dicts_to_exec(calls: list) -> list[str]:
+        """Convert [{func: {param: val}}, ...] to ["func(param=val)", ...]."""
+        result = []
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            for func_name, params in call.items():
+                if not isinstance(params, dict) or not params:
+                    result.append(f"{func_name}()")
+                else:
+                    args = ", ".join(f"{k}={repr(v)}" for k, v in params.items())
+                    result.append(f"{func_name}({args})")
+        return result
