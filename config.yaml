@@ -4,14 +4,12 @@
 # Designed for the Berkeley Function Calling Leaderboard (BFCL).
 
 name: bfcl-function-caller
-version: 0.1.0
+version: 0.2.0
 description: |
   General-purpose function calling model for the BFCL benchmark.
-  Unlike the SaaS tool router (which uses domain-specific exemplars),
-  this model dynamically encodes any function definition provided at
-  query time into HDC vectors. It extracts action verbs, parameter
-  names, type signatures, and description keywords from JSON Schema
-  function definitions, then matches user queries against them.
+  Dynamically encodes any function definition provided at query time
+  into HDC vectors. Matches user queries via 4-level hierarchical
+  cosine similarity. Multi-turn routing via CognitiveLoop.
 
 author: Glyphh AI
 license: MIT
@@ -20,40 +18,31 @@ encoder:
   dimensions: 10000
   seed: 42
 
-roles:
-  action:
-    type: categorical
-    values:
-      - get
-      - set
-      - create
-      - update
-      - delete
-      - find
-      - search
-      - list
-      - calculate
-      - convert
-      - check
-      - validate
-      - send
-      - add
-      - remove
-      - none
-
-  function_name:
-    type: text
-
-  description:
-    type: text
-
-  parameters:
-    type: text
-
-  return_type:
-    type: text
-    optional: true
+layers:
+  signature:
+    weight: 0.55
+    segments:
+      identity:
+        roles:
+          action: { weight: 1.0, type: categorical }
+          target: { weight: 0.7, type: categorical }
+          function_name: { weight: 0.9, type: text, encoding: bag_of_words }
+  semantics:
+    weight: 0.45
+    segments:
+      context:
+        roles:
+          description: { weight: 0.8, type: text, encoding: bag_of_words }
+          parameters: { weight: 0.6, type: text, encoding: bag_of_words }
 
 similarity:
   threshold: 0.45
+  irrelevance_threshold: 0.22
   top_k: 3
+  multi_gap_ratio: 0.75
+  multi_fallback_ratio: 0.20
+
+cognitive_loop:
+  enabled: true
+  dimension: 10000
+  confidence_threshold: 0.10

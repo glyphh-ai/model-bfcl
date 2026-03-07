@@ -1,6 +1,6 @@
 name: BFCL Function Caller
-description: Glyphh HDC model for the Berkeley Function Calling Leaderboard. Encodes arbitrary function definitions into HDC vectors and routes natural language queries to the correct function via cosine similarity. Zero tokens, sub-10ms.
-version: 0.1.0
+description: Glyphh HDC model for the Berkeley Function Calling Leaderboard. Encodes arbitrary function definitions into HDC vectors and routes natural language queries to the correct function via cosine similarity. Multi-turn via CognitiveLoop. Zero tokens, sub-10ms.
+version: 0.2.0
 author: Glyphh AI
 license: MIT
 icon: 🏆

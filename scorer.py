@@ -21,7 +21,7 @@ from glyphh.core.ops import cosine_similarity
 from glyphh.core.types import Concept, Glyph
 from glyphh.cognitive.model_scorer import ScorerResult
 
-from encoder import ENCODER_CONFIG, encode_function, encode_query
+from encoder import ENCODER_CONFIG, encode_function, encode_exemplar, encode_query
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +139,28 @@ class BFCLScorer:
             ))
             self._func_glyphs[func_def["name"]] = glyph
 
+    def configure_from_exemplars(self, exemplars: list[dict]) -> None:
+        """Encode pre-built exemplars into Glyphs.
+
+        Multiple exemplars per function: each variant encodes into a separate
+        Glyph. score() returns the function name from the best-matching
+        exemplar Glyph (stripped of variant suffix).
+        """
+        self._func_glyphs.clear()
+        self._func_defs.clear()
+
+        for exemplar in exemplars:
+            concept_dict = encode_exemplar(exemplar)
+            glyph = self._encoder.encode(Concept(
+                name=concept_dict["name"],
+                attributes=concept_dict["attributes"],
+            ))
+            # Key by "func_name__v{N}" to allow multiple Glyphs per function
+            func_name = exemplar["function_name"]
+            variant = exemplar.get("variant", 1)
+            key = f"{func_name}__v{variant}"
+            self._func_glyphs[key] = glyph
+
     def score(self, query: str) -> ScorerResult:
         """Score a query against configured functions. Returns single best match.
 
@@ -215,13 +237,33 @@ class BFCLScorer:
             attributes=q_dict["attributes"],
         ))
 
+    @staticmethod
+    def _strip_variant(name: str) -> str:
+        """Strip variant suffix: 'GorillaFileSystem.mv__v1' → 'GorillaFileSystem.mv'."""
+        idx = name.find("__v")
+        return name[:idx] if idx >= 0 else name
+
     def _score_all(self, q_glyph: Glyph) -> list[dict]:
-        """Score query against all function Glyphs, sorted descending."""
-        scores = [
+        """Score query against all function Glyphs, sorted descending.
+
+        When multiple exemplar variants exist for the same function,
+        keeps only the best-scoring variant per function.
+        """
+        raw_scores = [
             {"function": fname, "score": self._strategy.score_pair(q_glyph, fglyph)}
             for fname, fglyph in self._func_glyphs.items()
         ]
-        scores.sort(key=lambda x: x["score"], reverse=True)
+        raw_scores.sort(key=lambda x: x["score"], reverse=True)
+
+        # Deduplicate: keep best variant per function
+        seen: set[str] = set()
+        scores: list[dict] = []
+        for entry in raw_scores:
+            func = self._strip_variant(entry["function"])
+            if func not in seen:
+                seen.add(func)
+                scores.append({"function": func, "score": entry["score"]})
+
         return scores
 
     def _select_multiple(self, scores: list[dict]) -> list[str]:

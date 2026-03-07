@@ -9,12 +9,14 @@ Exports:
   ENCODER_CONFIG       — EncoderConfig for the BFCL model
   encode_function(func_def) — JSON Schema function → Concept dict
   encode_query(query)       — NL query → Concept dict
+  entry_to_record(func_def) — function def → Glyphh record (pipedream pattern)
+  assess_query(query)       — pre-routing query assessment (pipedream pattern)
 """
 
 import re
 
 from glyphh.core.config import EncoderConfig, Layer, Role, Segment
-from intent import extract_action, extract_target, extract_intent
+from intent import extract_action, extract_target, extract_intent, extract_pack_actions
 
 # ---------------------------------------------------------------------------
 # ENCODER_CONFIG
@@ -205,8 +207,20 @@ def _bow_value(words: list[str]) -> str:
     return " ".join(unique) if unique else "none"
 
 
+_TOOL_DESC_RE = re.compile(
+    r"^.*?Tool description:\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+
 def _clean_description(text: str) -> str:
-    """Strip boilerplate filler phrases from function descriptions."""
+    """Strip boilerplate filler phrases from function descriptions.
+
+    Handles Gorilla-style multi-turn func_doc descriptions that share a long
+    boilerplate prefix with the actual description after 'Tool description:'.
+    """
+    # Gorilla multi-turn: "This tool belongs to ... Tool description: <actual>"
+    if "Tool description:" in text:
+        text = _TOOL_DESC_RE.sub("", text)
     return _FILLER_PREFIX_RE.sub("", text).strip()
 
 
@@ -269,16 +283,25 @@ def encode_function(func_def: dict) -> dict:
     action_text = (last_seg + " " + name_words + " " + description[:100]).strip()
     action = extract_action(action_text)
 
-    non_action_name = (
-        _split_camel_snake(".".join(parts[:-1])) if len(parts) > 1 else name_words
-    )
-    target_text = (non_action_name + " " + description[:100]).strip()
+    # For class-prefixed names (GorillaFileSystem.mkdir), extract target from
+    # description only — the class prefix contains "file" which poisons all targets
+    if len(parts) > 1:
+        target_text = (last_seg + " " + description[:100]).strip()
+    else:
+        non_action_name = name_words
+        target_text = (non_action_name + " " + description[:100]).strip()
     target = extract_target(target_text)
 
     keywords = extract_intent(name_words + " " + description[:200])["keywords"]
     intent = {"action": action, "target": target, "keywords": keywords}
 
-    name_tokens  = _tokenize(name_words)
+    # For class-prefixed names (GorillaFileSystem.ls), tokenize only the method
+    # portion for function_name BoW — the shared class prefix dilutes signal
+    if len(parts) > 1:
+        method_words = _split_camel_snake(parts[-1])
+        name_tokens = _tokenize(method_words)
+    else:
+        name_tokens = _tokenize(name_words)
     desc_tokens  = _tokenize(description)
     param_tokens = _extract_param_tokens(func_def)
 
@@ -301,8 +324,9 @@ def encode_function(func_def: dict) -> dict:
 def encode_query(query: str) -> dict:
     """Convert a user query into a Concept-compatible dict.
 
-    - action + target: from intent extraction
-    - function_name:   ALL query tokens — wide net to match function name words
+    - action + target: from intent extraction (pack phrases have priority)
+    - function_name:   ALL query tokens + pack canonical actions injected
+                       (e.g., "grep" injected for "search for keyword Error")
     - description:     WHAT tokens only (HOW/framing words removed)
     - parameters:      numbers, quoted values, specific nouns
     """
@@ -311,13 +335,75 @@ def encode_query(query: str) -> dict:
     what_tokens  = [t for t in all_tokens if t not in _HOW_WORDS]
     param_tokens = _extract_query_param_tokens(query)
 
+    # Inject pack canonical actions into function_name BoW.
+    # This creates direct word-level matches between query and function vectors.
+    # E.g., "Investigate within log.txt for keyword Error" → pack detects "grep"
+    # → fn_tokens includes "grep" → matches GorillaFileSystem.grep's fn_bow "grep"
+    pack_actions = extract_pack_actions(query)
+    fn_tokens = all_tokens + pack_actions
+
     return {
         "name": "query",
         "attributes": {
             "action":        intent["action"],
             "target":        intent["target"],
-            "function_name": _bow_value(all_tokens),
+            "function_name": _bow_value(fn_tokens),
             "description":   _bow_value(what_tokens) if what_tokens else _bow_value(all_tokens),
             "parameters":    _bow_value(param_tokens) if param_tokens else _bow_value(all_tokens),
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Pipedream-pattern exports
+# ---------------------------------------------------------------------------
+
+def entry_to_record(func_def: dict) -> dict:
+    """Convert a BFCL function definition to a Glyphh record.
+
+    Follows the pipedream model pattern: concept_text + attributes + metadata.
+    Used for multi-turn func_doc entries and gorilla submission.
+    """
+    encoded = encode_function(func_def)
+    return {
+        "concept_text": func_def.get("name", "unknown"),
+        "attributes": encoded["attributes"],
+        "metadata": {
+            "name": func_def.get("name", "unknown"),
+            "description": func_def.get("description", ""),
+            "parameters": func_def.get("parameters", {}),
+        },
+    }
+
+
+def encode_exemplar(entry: dict) -> dict:
+    """Convert an exemplars.jsonl entry to a Concept-compatible dict for GlyphSpace.
+
+    Exemplars are pre-built by discover.py with weighted BoW descriptions.
+    The attributes match the same ENCODER_CONFIG roles as encode_function().
+    """
+    return {
+        "name": f"func_{entry['function_name']}",
+        "attributes": {
+            "action":        entry.get("action", "none"),
+            "target":        entry.get("target", "none"),
+            "function_name": entry.get("function_name_bow", "none"),
+            "description":   entry.get("description", "none"),
+            "parameters":    entry.get("parameters_bow", "none"),
+        },
+    }
+
+
+def assess_query(query: str) -> dict:
+    """Pre-routing query assessment.
+
+    Returns intent extraction + routing readiness signals.
+    Follows the pipedream model pattern.
+    """
+    intent = extract_intent(query)
+    return {
+        "action": intent["action"],
+        "target": intent["target"],
+        "keywords": intent["keywords"],
+        "is_suppressed": intent["action"] == "none" and intent["target"] == "none",
     }
