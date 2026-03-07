@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Run Glyphh pure-HDC model against the BFCL V4 benchmark.
+Run Glyphh HDC model against the BFCL V4 benchmark.
 
 BFCL V4 Overall = (Agentic × 40%) + (Multi-Turn × 30%) + (Live × 10%) + (Non-Live × 10%) + (Hallucination × 10%)
 
-Pure HDC. No LLM. No external services.
+Modes:
+  Default:  Pure HDC routing + rule-based argument extraction (no external services)
+  --hybrid: HDC routing + GPT-4o argument extraction (requires OPENAI_API_KEY)
 
 Usage:
     # Default (simple, multiple, parallel, parallel_multiple, irrelevance)
     python run_bfcl.py
+
+    # Hybrid mode — HDC routing + GPT-4o arg extraction
+    python run_bfcl.py --hybrid --all
 
     # Full routing suite (non-live + live + irrelevance)
     python run_bfcl.py --routing-only
@@ -36,7 +41,6 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from handler import BFCLHandler
-from extractor import ArgumentExtractor
 from memory import MemoryHandler
 
 DATA_DIR    = Path(__file__).parent / "data" / "bfcl"
@@ -292,9 +296,9 @@ def run_category(
 
         if category in IRRELEVANCE_CATS:
             res = _eval_irrelevance(handler, query, func_defs, entry_id)
-        elif need_multi:
+        elif category in PARALLEL_CATS or category in MULTI_ROUTE_CATS:
             expected = extract_expected_tool(answers.get(entry_id), category)
-            res = _eval_multi(handler, query, func_defs, entry_id, expected, force=True)
+            res = _eval_parallel(handler, query, func_defs, entry_id, expected, force=True)
         else:
             expected = extract_expected_tool(answers.get(entry_id), category)
             res = _eval_single(handler, query, func_defs, entry_id, expected, force=True)
@@ -362,6 +366,51 @@ def _eval_multi(
         json.dumps([{f: r["args"].get(f, {})} for f in r["tools"]])
         if r["tools"] else ""
     )
+    return {
+        "id":         entry_id,
+        "query":      query[:100],
+        "expected":   sorted(expected) if expected else [],
+        "predicted":  sorted(predicted_set),
+        "confidence": r["confidence"],
+        "correct":    correct,
+        "latency_ms": r["latency_ms"],
+        "top_k":      r["top_k"],
+        "gorilla_result": gorilla,
+    }
+
+
+def _eval_parallel(
+    handler: BFCLHandler,
+    query: str,
+    func_defs: list[dict],
+    entry_id: str,
+    expected: set[str] | None,
+    force: bool = False,
+) -> dict:
+    """Evaluate parallel calls — same function called N times with different args."""
+    r = handler.route_multi(query, func_defs, force=force)
+    predicted_set = set(r["tools"])
+    correct = predicted_set == expected if expected is not None else False
+
+    # Use parallel extraction if available (LLM extractor)
+    extractor = handler._extractor
+    if hasattr(extractor, "extract_parallel") and r["tools"]:
+        matched_defs = []
+        for fname in r["tools"]:
+            fdef = next((f for f in func_defs if f.get("name") == fname), None)
+            if fdef:
+                matched_defs.append(fdef)
+        if matched_defs:
+            calls = extractor.extract_parallel(query, matched_defs)
+            gorilla = json.dumps(calls) if calls else ""
+        else:
+            gorilla = json.dumps([{f: r["args"].get(f, {})} for f in r["tools"]])
+    else:
+        gorilla = (
+            json.dumps([{f: r["args"].get(f, {})} for f in r["tools"]])
+            if r["tools"] else ""
+        )
+
     return {
         "id":         entry_id,
         "query":      query[:100],
@@ -508,7 +557,7 @@ def _eval_multi_turn(
     path_accuracy = matched / total_expected.
     Entry is "correct" if path_accuracy >= 0.5.
     """
-    result    = handler.route_multi_turn(entry, func_defs)
+    result = handler.route_multi_turn(entry, func_defs)
     predicted = []
 
     for turn_result in result["per_turn"]:
@@ -526,7 +575,7 @@ def _eval_multi_turn(
     path_accuracy = correct / len(expected_path) if expected_path else 1.0
 
     # Build gorilla result: list[list[str]] with arg extraction per turn
-    extractor = ArgumentExtractor()
+    extractor = handler._extractor
     turns = entry.get("question", [])
     gorilla_turns: list[list[str]] = []
     for i, turn_result in enumerate(result["per_turn"]):
@@ -667,7 +716,7 @@ def run_memory_category(
             "response":     response[:200],
             "ground_truth": ground_truths,
             "correct":      is_correct,
-            "gorilla_result": response,
+            "gorilla_result": [[response]],
         })
 
     print()
@@ -773,9 +822,9 @@ def _print_errors(category: str, results: list[dict]) -> None:
             print(f"      top_k:    {top}")
 
 
-def print_report(category_results: list[dict]) -> None:
+def print_report(category_results: list[dict], extractor=None) -> None:
     print("\n" + "=" * 80)
-    print("  GLYPHH — PURE HDC — BFCL V4 BENCHMARK RESULTS")
+    print("  GLYPHH HDC — BFCL V4 BENCHMARK RESULTS")
     print("=" * 80)
 
     sections = [
@@ -786,8 +835,13 @@ def print_report(category_results: list[dict]) -> None:
         ("AGENTIC (40%)",       V4_AGENTIC_CATS),
     ]
 
+    has_tokens = extractor is not None
     cr_map = {cr["category"]: cr for cr in category_results}
+
+    token_cols = "  {'In Tok':>10} {'Out Tok':>10} {'Calls':>7}" if has_tokens else ""
     hdr = f"  {'Category':<30} {'Accuracy':>10} {'Correct':>10} {'Total':>8} {'Lat(ms)':>10}"
+    if has_tokens:
+        hdr += f" {'In Tok':>10} {'Out Tok':>10} {'Calls':>7}"
     print(f"\n{hdr}")
     print("  " + "-" * (len(hdr) - 2))
 
@@ -797,13 +851,17 @@ def print_report(category_results: list[dict]) -> None:
             continue
         print(f"\n  ┌─ {section_name}")
         for cr in section_results:
-            print(
+            line = (
                 f"  │ {cr['category']:<28} "
                 f"{cr['accuracy']:>9.1%} "
                 f"{cr['correct']:>10} "
                 f"{cr['total']:>8} "
                 f"{cr['avg_latency_ms']:>9.1f}"
             )
+            tu = cr.get("token_usage")
+            if has_tokens and tu:
+                line += f" {tu['input_tokens']:>10,} {tu['output_tokens']:>10,} {tu['calls']:>7,}"
+            print(line)
 
     # Uncategorised
     categorised = {c for _, cats in sections for c in cats}
@@ -837,6 +895,19 @@ def print_report(category_results: list[dict]) -> None:
         print(f"    {label:<24} {s}")
     if v4["overall"] is not None:
         print(f"\n    OVERALL ({pct_w:.0f}% of V4):     {v4['overall']:>7.1%}")
+
+    if has_tokens:
+        usage = extractor.get_total_usage()
+        # Haiku pricing: $0.80/MTok input, $4.00/MTok output
+        cost_in = usage["input_tokens"] / 1_000_000 * 0.80
+        cost_out = usage["output_tokens"] / 1_000_000 * 4.00
+        cost_total = cost_in + cost_out
+        print(f"\n  TOKEN USAGE:")
+        print(f"    Input tokens:  {usage['input_tokens']:>12,}")
+        print(f"    Output tokens: {usage['output_tokens']:>12,}")
+        print(f"    API calls:     {usage['calls']:>12,}")
+        print(f"    Est. cost:     ${cost_total:>11.4f}  (in: ${cost_in:.4f}, out: ${cost_out:.4f})")
+
     print("  " + "=" * (len(hdr) - 2))
 
 
@@ -876,7 +947,12 @@ def write_gorilla_output(category_results: list[dict], output_dir: str) -> None:
         if not result_name:
             continue
 
-        group_dir = out / group
+        # Memory results go in agentic/memory/<backend>/ per gorilla convention
+        if cat in MEMORY_CATS:
+            backend = cat[len("memory_"):]  # kv, vector, rec_sum
+            group_dir = out / group / "memory" / backend
+        else:
+            group_dir = out / group
         group_dir.mkdir(parents=True, exist_ok=True)
 
         fpath = group_dir / result_name
@@ -935,6 +1011,14 @@ def main() -> None:
         "--output-gorilla", type=str, default=None,
         help="Directory to save gorilla-format JSONL result files for leaderboard submission",
     )
+    parser.add_argument(
+        "--hybrid", action="store_true",
+        help="Use Claude for argument extraction (requires ANTHROPIC_API_KEY)",
+    )
+    parser.add_argument(
+        "--llm-model", type=str, default="claude-haiku-4-5-20251001",
+        help="LLM model for hybrid arg extraction (default: claude-haiku-4-5-20251001)",
+    )
     args = parser.parse_args()
 
     if args.categories:
@@ -954,16 +1038,28 @@ def main() -> None:
         print("Done.")
         return
 
-    handler = BFCLHandler(confidence_threshold=args.threshold)
+    extractor = None
+    if args.hybrid:
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print("ERROR: --hybrid requires ANTHROPIC_API_KEY environment variable")
+            sys.exit(1)
+        from llm_extractor import LLMArgumentExtractor
+        extractor = LLMArgumentExtractor(model=args.llm_model)
 
+    handler = BFCLHandler(confidence_threshold=args.threshold, extractor=extractor)
+
+    mode = f"hybrid (HDC routing + {args.llm_model} extraction)" if args.hybrid else "pure HDC"
     print(f"\nCategories : {categories}")
     print(f"Threshold  : {args.threshold}")
-    print(f"Mode       : pure HDC (no LLM)")
+    print(f"Mode       : {mode}")
     print()
 
     category_results: list[dict] = []
     for cat in categories:
         print(f"── {cat} ──")
+        if extractor:
+            extractor.snapshot()
         if cat in MEMORY_CATS:
             result = run_memory_category(
                 cat,
@@ -983,9 +1079,11 @@ def main() -> None:
                 verbose=args.verbose,
             )
         if result:
+            if extractor:
+                result["token_usage"] = extractor.get_category_usage()
             category_results.append(result)
 
-    print_report(category_results)
+    print_report(category_results, extractor=extractor)
 
     if args.output:
         out_dir = Path(args.output)

@@ -1,12 +1,10 @@
 """
-BFCL handler — pure HDC routing + schema-guided argument extraction.
+BFCL handler — HDC routing + argument extraction.
 
 BFCLHandler ties together:
   BFCLScorer        — HDC function routing (which function to call)
-  ArgumentExtractor — schema-guided arg extraction (what values to pass)
+  Extractor         — argument extraction (rule-based or LLM-assisted)
   CognitiveLoop     — multi-turn routing with episodic memory + deduction
-
-No LLM. No external services. All computation is local and deterministic.
 
 Exports:
   BFCLHandler.route(query, func_defs)            → single-function routing result
@@ -49,10 +47,11 @@ _CLASS_TO_FOLDER = {
 
 
 class BFCLHandler:
-    """Pure HDC BFCL handler. No LLM.
+    """HDC routing + pluggable argument extraction.
 
     Usage:
-        handler = BFCLHandler()
+        handler = BFCLHandler()                          # rule-based extraction
+        handler = BFCLHandler(extractor=LLMExtractor())  # LLM-assisted extraction
         result  = handler.route(query, func_defs)
         # result["tool"]       — predicted function name (or None if irrelevant)
         # result["args"]       — extracted argument dict
@@ -60,9 +59,14 @@ class BFCLHandler:
         # result["top_k"]      — top-5 scored functions for debugging
     """
 
-    def __init__(self, confidence_threshold: float = 0.22, irrelevance_threshold: float = 0.60) -> None:
+    def __init__(
+        self,
+        confidence_threshold: float = 0.22,
+        irrelevance_threshold: float = 0.60,
+        extractor: Any | None = None,
+    ) -> None:
         self._scorer    = BFCLScorer()
-        self._extractor = ArgumentExtractor()
+        self._extractor = extractor or ArgumentExtractor()
         self._threshold = confidence_threshold
         self._irr_threshold = irrelevance_threshold
 
