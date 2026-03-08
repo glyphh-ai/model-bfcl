@@ -84,11 +84,64 @@ _PACK_ACTION_MAP: dict[str, str] = {
     "unlock": "open", "start_engine": "start", "stop_engine": "stop",
     "set_navigation": "find", "check_fuel": "get", "honk": "run",
     "set_climate": "set", "check_diagnostics": "get", "open_trunk": "open",
+    "fill_fuel_tank": "add", "check_tire_pressure": "check",
+    "gallon_to_liter": "convert", "liter_to_gallon": "convert",
+    "get_zipcode": "get", "estimate_distance": "calculate",
+    "estimate_drive_feasibility": "check", "display_car_status": "get",
+    "display_log": "get", "find_tire_shop": "find",
+    "get_current_speed": "get", "get_outside_temperature": "get",
+    "press_brake_pedal": "run", "release_brake_pedal": "run",
+    "activate_parking_brake": "set", "set_headlights": "set",
+    # trading (new)
+    "add_to_watchlist": "add", "remove_from_watchlist": "remove",
+    "get_watchlist": "get", "filter_stocks_by_price": "filter",
+    "fund_account": "add", "withdraw_funds": "remove",
+    "get_account_info": "get", "get_available_stocks": "get",
+    "get_current_time": "get", "get_order_details": "get",
+    "get_order_history": "get", "get_stock_info": "get",
+    "get_symbol_by_name": "get", "get_transaction_history": "get",
+    "notify_price_change": "set", "trading_login": "start",
+    "trading_logout": "stop", "trading_get_login_status": "get",
+    # travel (new)
+    "authenticate_travel": "start", "compute_exchange_rate": "calculate",
+    "contact_customer_support": "send", "get_all_credit_cards": "get",
+    "get_booking_history": "get", "get_budget_fiscal_year": "get",
+    "get_credit_card_balance": "get", "get_flight_cost": "get",
+    "get_nearest_airport": "find", "list_all_airports": "list",
+    "purchase_insurance": "create", "register_credit_card": "add",
+    "retrieve_invoice": "get", "set_budget_limit": "set",
+    "travel_get_login_status": "get", "verify_traveler_info": "check",
+    # social (new)
+    "authenticate_social": "start", "get_tweet": "get",
+    "get_tweet_comments": "get", "get_user_stats": "get",
+    "get_user_tweets": "get", "list_all_following": "list",
+    "search_tweets": "search", "social_get_login_status": "get",
+    # math (new)
+    "absolute_value": "calculate", "max_value": "calculate",
+    "min_value": "calculate", "round_number": "calculate",
+    "percentage": "calculate", "standard_deviation": "calculate",
+    "sum_values": "calculate", "mean": "calculate",
+    "si_unit_conversion": "convert", "imperial_si_conversion": "convert",
+    # messaging (new pack)
+    "send_message": "send", "view_messages": "get",
+    "delete_message": "delete", "search_messages": "search",
+    "add_contact": "add", "get_user_id": "get",
+    "list_users": "list", "get_message_stats": "get",
+    "message_login": "start", "message_get_login_status": "get",
+    # ticket (new pack)
+    "create_ticket": "create", "resolve_ticket": "update",
+    "get_ticket": "get", "close_ticket": "close",
+    "edit_ticket": "update", "get_user_tickets": "get",
+    "ticket_login": "start", "ticket_logout": "stop",
+    "ticket_get_login_status": "get",
+    # filesystem (new)
+    "du": "get", "rmdir": "delete",
 }
 
 # Pack phrase data: list of (phrase, bfcl_action, pack_canonical)
 # Sorted by phrase length desc for longest-match-first
-_PACK_PHRASES: list[tuple[str, str, str]] = []
+_PACK_PHRASES: list[tuple[str, str, str]] = []       # multi-word phrases (substring match)
+_PACK_SINGLE_WORDS: list[tuple[str, str, str]] = []   # single-word synonyms (word-boundary match)
 _PACKS: dict[str, dict] = {}  # raw pack data keyed by pack name
 _PACKS_LOADED = False
 
@@ -98,7 +151,7 @@ _CLASS_TO_PACK: dict[str, str] = {
     "TwitterAPI":        "social",
     "MessageAPI":        "social",
     "PostingAPI":        "social",
-    "TicketAPI":         "saas",
+    "TicketAPI":         "ticket",
     "MathAPI":           "math",
     "TradingBot":        "trading",
     "TravelBookingAPI":  "travel",
@@ -109,7 +162,7 @@ _CLASS_TO_PACK: dict[str, str] = {
 
 def _load_packs() -> None:
     """Load all relevant intent packs from SDK for phrase matching."""
-    global _PACK_PHRASES, _PACKS, _PACKS_LOADED
+    global _PACK_PHRASES, _PACK_SINGLE_WORDS, _PACKS, _PACKS_LOADED
     if _PACKS_LOADED:
         return
     _PACKS_LOADED = True
@@ -118,8 +171,9 @@ def _load_packs() -> None:
     if not packs_dir.exists():
         return
 
-    pack_names = ["filesystem", "social", "math", "trading", "travel", "vehicle", "saas", "churn"]
+    pack_names = ["filesystem", "social", "math", "trading", "travel", "vehicle", "saas", "churn", "messaging", "ticket"]
     phrases: list[tuple[str, str, str]] = []
+    single_words: list[tuple[str, str, str]] = []
 
     for pack_name in pack_names:
         path = packs_dir / f"{pack_name}.json"
@@ -136,7 +190,7 @@ def _load_packs() -> None:
             if bfcl_action:
                 phrases.append((p["phrase"].lower(), bfcl_action, canonical))
 
-        # Action-level phrases and synonyms (both multi-word and single-word)
+        # Action-level phrases and synonyms
         for action_def in data.get("actions", []):
             canonical = action_def["canonical"]
             bfcl_action = _PACK_ACTION_MAP.get(canonical)
@@ -146,13 +200,14 @@ def _load_packs() -> None:
                 phrases.append((phrase.lower(), bfcl_action, canonical))
             for syn in action_def.get("synonyms", []):
                 syn_lower = syn.lower()
-                # Include single-word synonyms (>2 chars to avoid noise)
-                # Critical for matching paraphrased BFCL queries like
-                # "display the files" → "display" → cat canonical
-                if len(syn_lower) > 2:
+                if " " in syn_lower:
+                    # Multi-word synonyms → substring match
                     phrases.append((syn_lower, bfcl_action, canonical))
+                elif len(syn_lower) > 3:
+                    # Single-word synonyms (>3 chars) → word-boundary match
+                    single_words.append((syn_lower, bfcl_action, canonical))
 
-    # Dedupe and sort by length desc (longest match first)
+    # Dedupe and sort phrases by length desc (longest match first)
     seen = set()
     unique = []
     for phrase, action, canonical in phrases:
@@ -161,6 +216,16 @@ def _load_packs() -> None:
             seen.add(key)
             unique.append((phrase, action, canonical))
     _PACK_PHRASES = sorted(unique, key=lambda x: len(x[0]), reverse=True)
+
+    # Dedupe single-word synonyms
+    seen_sw = set()
+    unique_sw = []
+    for word, action, canonical in single_words:
+        key = (word, canonical)
+        if key not in seen_sw:
+            seen_sw.add(key)
+            unique_sw.append((word, action, canonical))
+    _PACK_SINGLE_WORDS = unique_sw
 
 
 def _match_pack_phrase(text: str) -> tuple[str, str] | None:
@@ -180,14 +245,22 @@ def _match_pack_phrase(text: str) -> tuple[str, str] | None:
 def extract_pack_actions(text: str) -> list[str]:
     """Extract pack canonical action names from text using phrase matching.
 
+    Multi-word phrases use substring match (longest first).
+    Single-word synonyms use word-boundary regex match to avoid false positives.
+
     Returns list of pack canonical names (e.g., ["grep", "tail"]).
     Used by encoder to inject into function_name BoW for direct matching.
     """
     _load_packs()
     text_lower = text.lower()
     matched: list[str] = []
+    # Multi-word phrases: substring match (sorted longest first)
     for phrase, _, canonical in _PACK_PHRASES:
         if phrase in text_lower and canonical not in matched:
+            matched.append(canonical)
+    # Single-word synonyms: word-boundary match
+    for word, _, canonical in _PACK_SINGLE_WORDS:
+        if canonical not in matched and re.search(rf'\b{re.escape(word)}\b', text_lower):
             matched.append(canonical)
     return matched
 

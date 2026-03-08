@@ -133,6 +133,33 @@ def _extract_param_tokens(func_def: dict) -> list[str]:
 # Action/target extraction (simplified from intent.py)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Per-class intent loading (uses FUNCTION_INTENTS from classes/{folder}/intent.py)
+# ---------------------------------------------------------------------------
+
+def _load_class_intents(cls: str) -> dict[str, tuple[str, str]] | None:
+    """Load FUNCTION_INTENTS from per-class intent.py if it exists."""
+    folder = CLASS_TO_FOLDER.get(cls)
+    if not folder:
+        return None
+    intent_file = CLASSES_DIR / folder / "intent.py"
+    if not intent_file.exists():
+        return None
+    # Parse FUNCTION_INTENTS from the file without importing
+    content = intent_file.read_text()
+    # Find the FUNCTION_INTENTS dict
+    match = re.search(r'FUNCTION_INTENTS\s*=\s*\{(.+?)\n\}', content, re.DOTALL)
+    if not match:
+        return None
+    intents = {}
+    for line in match.group(1).split("\n"):
+        # Parse lines like:  "startEngine":           ("start", "engine"),
+        m = re.match(r'\s*"(\w+)":\s*\("(\w+)",\s*"(\w+)"\)', line)
+        if m:
+            intents[m.group(1)] = (m.group(2), m.group(3))
+    return intents if intents else None
+
+
 _ACTION_VERBS = {
     # Filesystem
     "cat": "read", "cd": "navigate", "cp": "copy", "diff": "compare",
@@ -355,8 +382,12 @@ def generate_exemplars(cls: str, func_defs: list[dict],
 
     Follows pipedream pattern: each variant emphasizes different words
     so HDC cosine search matches diverse query phrasings.
+    Uses per-class FUNCTION_INTENTS when available for refined action/target.
     """
     folder = CLASS_TO_FOLDER.get(cls, cls.lower())
+
+    # Try to load per-class intents (refined action/target from class intent.py)
+    class_intents = _load_class_intents(cls)
 
     # Compute shared class boilerplate tokens (appear in ALL descriptions)
     all_desc_tokens = []
@@ -380,9 +411,12 @@ def generate_exemplars(cls: str, func_defs: list[dict],
         param_tokens = _extract_param_tokens(fd)
         name_tokens = _tokenize(_split_camel_snake(func_name))
 
-        # Action and target
-        action = _ACTION_VERBS.get(func_name, "none")
-        target = _TARGET_DEFAULTS.get(func_name, "none")
+        # Action and target: prefer per-class intents, fall back to global
+        if class_intents and func_name in class_intents:
+            action, target = class_intents[func_name]
+        else:
+            action = _ACTION_VERBS.get(func_name, "none")
+            target = _TARGET_DEFAULTS.get(func_name, "none")
 
         # Differentiating words: desc tokens NOT in shared boilerplate
         diff_words = [t for t in desc_tokens if t not in shared_tokens]

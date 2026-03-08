@@ -92,6 +92,10 @@ BFCL_ANSWER_FILES = {
     "memory_kv":              "possible_answer/BFCL_v4_memory.json",
     "memory_vector":          "possible_answer/BFCL_v4_memory.json",
     "memory_rec_sum":         "possible_answer/BFCL_v4_memory.json",
+    "multi_turn_base":        "possible_answer/BFCL_v4_multi_turn_base.json",
+    "multi_turn_miss_func":   "possible_answer/BFCL_v4_multi_turn_miss_func.json",
+    "multi_turn_miss_param":  "possible_answer/BFCL_v4_multi_turn_miss_param.json",
+    "multi_turn_long_context": "possible_answer/BFCL_v4_multi_turn_long_context.json",
 }
 
 V4_NONLIVE_CATS       = ["simple", "java", "javascript", "multiple", "parallel", "parallel_multiple"]
@@ -507,6 +511,15 @@ def run_multi_turn_category(
     if max_entries:
         entries = entries[:max_entries]
 
+    # Load ground truth answers
+    answer_filename = BFCL_ANSWER_FILES.get(category)
+    gt_by_id: dict[str, list] = {}
+    if answer_filename:
+        answer_path = DATA_DIR / answer_filename
+        if answer_path.exists():
+            for ae in load_jsonl(answer_path):
+                gt_by_id[ae.get("id", "")] = ae.get("ground_truth", [])
+
     # Pre-filter valid entries and build work items
     work_items = []
     for i, entry in enumerate(entries):
@@ -517,7 +530,8 @@ def run_multi_turn_category(
         if not path or not involved:
             continue
         func_defs = load_multi_turn_func_defs(involved, excluded)
-        work_items.append((i, entry, func_defs, entry_id, path))
+        gt = gt_by_id.get(entry_id, [])
+        work_items.append((i, entry, func_defs, entry_id, path, gt))
 
     total     = len(work_items)
     results   = [None] * total
@@ -528,8 +542,8 @@ def run_multi_turn_category(
     WORKERS = 10
 
     def _process(idx, item):
-        _, entry, func_defs, entry_id, path = item
-        return idx, _eval_multi_turn(handler, entry, func_defs, entry_id, path)
+        _, entry, func_defs, entry_id, path, gt = item
+        return idx, _eval_multi_turn(handler, entry, func_defs, entry_id, path, gt)
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = {
@@ -654,84 +668,155 @@ def _eval_multi_turn(
     func_defs: list[dict],
     entry_id: str,
     expected_path: list[str],
+    ground_truth: list | None = None,
 ) -> dict:
     """Evaluate a single multi-turn entry.
 
-    Scoring: multiset coverage — greedily match predicted functions against
-    the expected path (order-independent). This is more forgiving than strict
-    sequential matching: a correct function in the wrong turn still counts.
-
-    path_accuracy = matched / total_expected.
-    Entry is "correct" if path_accuracy >= 0.5.
+    Interleaved routing + extraction:
+      For each turn:
+        1. HDC routes functions (CognitiveLoop state-aware deduction)
+        2. LLM extracts arguments (with conversation context + initial config)
+        3. CognitiveLoop state updates (cd → CWD change, etc.)
+      This ensures turn N+1 routing knows the state from turn N.
     """
-    result = handler.route_multi_turn(entry, func_defs)
-    predicted = []
+    import time as _time
+    t0 = _time.perf_counter()
 
-    # Build set of available bare function names (for prereq injection)
-    available_bare = {_strip_class_prefix(f["name"]) for f in func_defs}
+    # Setup: create CognitiveLoops per class for state tracking
+    ctx = handler.setup_multi_turn(entry, func_defs)
     involved_classes = entry.get("involved_classes", [])
+    available_bare = {_strip_class_prefix(f["name"]) for f in func_defs}
+    initial_config = entry.get("initial_config")
 
-    # Track already-called functions across turns (for one-shot prereqs)
-    already_called: set[str] = set()
-
-    for turn_result in result["per_turn"]:
-        for func in turn_result["functions"]:
-            predicted.append(func)
-
-    # Multiset coverage: greedily match predicted against expected path
-    remaining = list(expected_path)
-    correct = 0
-    for func in predicted:
-        if func in remaining:
-            remaining.remove(func)
-            correct += 1
-
-    path_accuracy = correct / len(expected_path) if expected_path else 1.0
-
-    # Build gorilla result: list[list[str]] with arg extraction per turn
     extractor = handler._extractor
+    is_llm = hasattr(extractor, 'extract_multi_turn')
     turns = entry.get("question", [])
-    gorilla_turns: list[list[str]] = []
-    already_called_gorilla: set[str] = set()
 
-    for i, turn_result in enumerate(result["per_turn"]):
-        funcs = turn_result["functions"]
-        if not funcs:
+    predicted: list[str] = []
+    gorilla_turns: list[list[str]] = []
+    already_called: set[str] = set()
+    conversation_history: list[str] = []
+    previous_calls: list[list[dict]] = []
+
+    # Full LLM mode: LLM handles routing + extraction per turn
+    # HDC still does class detection (stage 1) to scope available functions
+    is_full_llm = is_llm and hasattr(extractor, 'route_and_extract_turn')
+
+    for i, turn_messages in enumerate(turns):
+        if not turn_messages:
             gorilla_turns.append([])
+            previous_calls.append([])
             continue
 
-        # Inject prerequisites per class
-        for cls in involved_classes:
-            funcs = _inject_prerequisites(funcs, cls, available_bare, already_called_gorilla)
+        query = handler._extract_turn_query(turn_messages)
+        if not query:
+            gorilla_turns.append([])
+            previous_calls.append([])
+            continue
 
-        # Extract query for this turn
-        query = ""
-        if i < len(turns) and turns[i]:
-            for msg in reversed(turns[i]):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    query = msg.get("content", "")
-                    break
+        if is_full_llm:
+            # ── FULL LLM MODE: LLM decides which functions + args ──
+            # HDC class detection scopes available functions
+            calls = extractor.route_and_extract_turn(
+                query, func_defs, conversation_history,
+                previous_calls=previous_calls,
+                initial_config=initial_config,
+            )
+            # Track predicted function names for our internal scoring
+            for call in calls:
+                for fname in call:
+                    predicted.append(fname)
+                    already_called.add(fname)
+        else:
+            # ── HDC ROUTING + LLM/RULE EXTRACTION ──
+            # STEP 1: Route (HDC + CognitiveLoop state-aware deduction)
+            funcs = handler.route_turn(query, ctx)
 
-        # Build function calls with BARE names (no class prefix)
-        # The gorilla eval's _process_method_calls adds instance names automatically
-        calls = []
-        for fname in funcs:
-            bare = _strip_class_prefix(fname)
-            fdef = next((f for f in func_defs if f["name"] == fname), None)
-            args = extractor.extract(query, fdef) if fdef and query else {}
-            calls.append({bare: args})
-            already_called_gorilla.add(bare)
+            # Inject prerequisites
+            for cls in involved_classes:
+                funcs = _inject_prerequisites(funcs, cls, available_bare, already_called)
+
+            for func in funcs:
+                predicted.append(func)
+
+            # STEP 2: Extract arguments
+            turn_fdefs = []
+            for fname in funcs:
+                fdef = next((f for f in func_defs if f["name"] == fname), None)
+                if fdef:
+                    turn_fdefs.append(fdef)
+
+            # Get current state from CognitiveLoop (CWD etc.)
+            loops = ctx.get("loops", {})
+            current_state = None
+            if funcs:
+                first_cls = funcs[0].split(".")[0]
+                loop = loops.get(first_cls)
+                if loop:
+                    current_state = dict(loop._state)
+
+            if is_llm and turn_fdefs and query:
+                calls = extractor.extract_multi_turn(
+                    query, turn_fdefs, conversation_history,
+                    initial_config=initial_config,
+                    current_state=current_state,
+                )
+            else:
+                calls = []
+                for fname in funcs:
+                    bare = _strip_class_prefix(fname)
+                    fdef = next((f for f in func_defs if f["name"] == fname), None)
+                    args = extractor.extract(query, fdef) if fdef and query else {}
+                    calls.append({bare: args})
+
+            for call in calls:
+                for fname in call:
+                    already_called.add(fname)
+
+        # ── STEP 3: Update CognitiveLoop state with extracted args ──
+        handler.update_turn_state(ctx, calls)
+
         gorilla_turns.append([json.dumps(calls)])
+        previous_calls.append(calls)
+        conversation_history.append(query)
+
+    elapsed = (_time.perf_counter() - t0) * 1000
+
+    # Score against ground truth
+    if ground_truth:
+        gt_funcs = []
+        for turn_gt in ground_truth:
+            for call in turn_gt:
+                if isinstance(call, str):
+                    gt_funcs.append(call.split("(")[0])
+        pred_bare = [_strip_class_prefix(f) for f in predicted]
+        remaining_gt = list(gt_funcs)
+        correct = 0
+        for func in pred_bare:
+            if func in remaining_gt:
+                remaining_gt.remove(func)
+                correct += 1
+        path_accuracy = correct / len(gt_funcs) if gt_funcs else 1.0
+        expected_display = gt_funcs
+    else:
+        remaining = list(expected_path)
+        correct = 0
+        for func in predicted:
+            if func in remaining:
+                remaining.remove(func)
+                correct += 1
+        path_accuracy = correct / len(expected_path) if expected_path else 1.0
+        expected_display = expected_path
 
     return {
         "id":            entry_id,
-        "expected_path": expected_path,
+        "expected_path": expected_display,
         "predicted":     predicted,
         "path_accuracy": path_accuracy,
         "correct":       path_accuracy >= 0.5,
-        "latency_ms":    result["latency_ms"],
+        "latency_ms":    elapsed,
         "path_correct":  correct,
-        "path_total":    len(expected_path),
+        "path_total":    len(expected_display),
         "gorilla_result": gorilla_turns,
     }
 
