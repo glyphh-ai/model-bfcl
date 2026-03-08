@@ -43,15 +43,6 @@ class BFCLScoringStrategy:
     _W_SEGMENT = 0.25
     _W_ROLE    = 0.60
 
-    # Per-role weights: action gets 2x to better distinguish Find vs Buy/Book
-    _ROLE_WEIGHTS: dict[str, float] = {
-        "action":        2.0,
-        "target":        1.0,
-        "function_name": 1.5,
-        "description":   1.0,
-        "parameters":    0.8,
-    }
-
     def score_pair(self, q: Glyph, f: Glyph) -> float:
         """Compute weighted hierarchical similarity between query and function Glyphs."""
         # Global cortex
@@ -82,9 +73,8 @@ class BFCLScoringStrategy:
                     )))
         seg_sim = sum(seg_sims) / len(seg_sims) if seg_sims else 0.0
 
-        # Role-level weighted average (most discriminating)
-        role_weighted_sum = 0.0
-        role_weight_total = 0.0
+        # Role-level average (most discriminating)
+        role_sims = []
         for lname in q.layers:
             if lname not in f.layers:
                 continue
@@ -95,11 +85,8 @@ class BFCLScoringStrategy:
                     if rname in f.layers[lname].segments[sname].roles:
                         qr = q.layers[lname].segments[sname].roles[rname].data
                         fr = f.layers[lname].segments[sname].roles[rname].data
-                        sim = float(cosine_similarity(qr, fr))
-                        w = self._ROLE_WEIGHTS.get(rname, 1.0)
-                        role_weighted_sum += sim * w
-                        role_weight_total += w
-        role_sim = role_weighted_sum / role_weight_total if role_weight_total > 0 else 0.0
+                        role_sims.append(float(cosine_similarity(qr, fr)))
+        role_sim = sum(role_sims) / len(role_sims) if role_sims else 0.0
 
         return (
             self._W_CORTEX  * cortex_sim
@@ -136,12 +123,16 @@ class BFCLScorer:
         self._strategy  = BFCLScoringStrategy()
         self._func_glyphs: dict[str, Glyph] = {}
         self._func_defs:   dict[str, dict]  = {}
+        self._locked: bool = False  # True when configured from exemplars
 
     # ── ModelScorer protocol ─────────────────────────────────────────────
 
     def configure(self, func_defs: list[dict[str, Any]]) -> None:
         """Encode function definitions into Glyphs."""
         self._func_defs = {f["name"]: f for f in func_defs}
+        if self._locked:
+            return  # Exemplar glyphs already loaded — don't overwrite
+
         self._func_glyphs.clear()
 
         for func_def in func_defs:
@@ -158,6 +149,9 @@ class BFCLScorer:
         Multiple exemplars per function: each variant encodes into a separate
         Glyph. score() returns the function name from the best-matching
         exemplar Glyph (stripped of variant suffix).
+
+        Locks the scorer so subsequent configure() calls (e.g. from
+        CognitiveLoop.begin()) update func_defs but don't overwrite glyphs.
         """
         self._func_glyphs.clear()
         self._func_defs.clear()
@@ -173,6 +167,8 @@ class BFCLScorer:
             variant = exemplar.get("variant", 1)
             key = f"{func_name}__v{variant}"
             self._func_glyphs[key] = glyph
+
+        self._locked = True
 
     def score(self, query: str) -> ScorerResult:
         """Score a query against configured functions. Returns single best match.
@@ -234,7 +230,14 @@ class BFCLScorer:
         return self._encode_query(query)
 
     def get_func_glyphs(self) -> dict[str, Glyph]:
-        """Return encoded function Glyphs (ModelScorer protocol)."""
+        """Return encoded function Glyphs (ModelScorer protocol).
+
+        Returns empty dict when locked (exemplar mode) to force the
+        classifier to use scorer.score() fallback, which handles
+        variant deduplication correctly.
+        """
+        if self._locked:
+            return {}
         return dict(self._func_glyphs)
 
     def scoring_strategy(self) -> BFCLScoringStrategy:

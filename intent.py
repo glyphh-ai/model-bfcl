@@ -136,7 +136,7 @@ def _load_packs() -> None:
             if bfcl_action:
                 phrases.append((p["phrase"].lower(), bfcl_action, canonical))
 
-        # Action-level phrases and multi-word synonyms
+        # Action-level phrases and synonyms (both multi-word and single-word)
         for action_def in data.get("actions", []):
             canonical = action_def["canonical"]
             bfcl_action = _PACK_ACTION_MAP.get(canonical)
@@ -145,8 +145,12 @@ def _load_packs() -> None:
             for phrase in action_def.get("phrases", []):
                 phrases.append((phrase.lower(), bfcl_action, canonical))
             for syn in action_def.get("synonyms", []):
-                if " " in syn:  # multi-word synonyms as phrases
-                    phrases.append((syn.lower(), bfcl_action, canonical))
+                syn_lower = syn.lower()
+                # Include single-word synonyms (>2 chars to avoid noise)
+                # Critical for matching paraphrased BFCL queries like
+                # "display the files" → "display" → cat canonical
+                if len(syn_lower) > 2:
+                    phrases.append((syn_lower, bfcl_action, canonical))
 
     # Dedupe and sort by length desc (longest match first)
     seen = set()

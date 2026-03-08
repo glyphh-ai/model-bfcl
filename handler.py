@@ -26,7 +26,7 @@ from glyphh import CognitiveLoop
 from scorer import BFCLScorer
 from extractor import ArgumentExtractor
 from domain_config import CLASS_DOMAIN_CONFIGS
-from intent import extract_api_class
+from intent import extract_api_class, extract_pack_actions
 
 # Per-class exemplar directories
 _CLASSES_DIR = Path(__file__).parent / "classes"
@@ -43,6 +43,82 @@ _CLASS_TO_FOLDER = {
     "TravelAPI":         "travel_booking",
     "TravelBookingAPI":  "travel_booking",
     "VehicleControlAPI": "vehicle_control",
+}
+
+# Class name → SDK pack names for CognitiveLoop
+_CLASS_TO_PACKS: dict[str, list[str]] = {
+    "GorillaFileSystem": ["filesystem"],
+    "TwitterAPI":        ["social"],
+    "MessageAPI":        ["social"],
+    "PostingAPI":        ["social"],
+    "TicketAPI":         [],
+    "MathAPI":           ["math"],
+    "TradingBot":        ["trading"],
+    "TravelAPI":         ["travel"],
+    "TravelBookingAPI":  ["travel"],
+    "VehicleControlAPI": ["vehicle"],
+}
+
+# Pack canonical action → class-prefixed function name (overrides for non-obvious mappings)
+# For GorillaFileSystem, pack canonicals ARE bare function names — auto-derived.
+# For other classes, explicit mappings where pack canonical != bare function name.
+_PACK_FUNC_OVERRIDES: dict[str, dict[str, str]] = {
+    "TwitterAPI": {
+        "post":    "TwitterAPI.post_tweet",
+        "repost":  "TwitterAPI.retweet",
+        "comment": "TwitterAPI.comment",
+        "mention": "TwitterAPI.mention",
+    },
+    "MessageAPI": {
+        "dm_social": "MessageAPI.send_message",
+    },
+    "PostingAPI": {
+        "post":    "PostingAPI.post",
+        "comment": "PostingAPI.comment",
+        "repost":  "PostingAPI.share",
+    },
+    "MathAPI": {
+        "add":        "MathAPI.add",
+        "subtract":   "MathAPI.subtract",
+        "multiply":   "MathAPI.multiply",
+        "divide":     "MathAPI.divide",
+        "power":      "MathAPI.power",
+        "sqrt":       "MathAPI.square_root",
+        "log":        "MathAPI.logarithm",
+        "statistics": "MathAPI.mean",
+    },
+    "TradingBot": {
+        "buy":           "TradingBot.buy",
+        "sell":          "TradingBot.sell",
+        "get_quote":     "TradingBot.get_quote",
+        "get_balance":   "TradingBot.get_balance",
+        "get_history":   "TradingBot.get_history",
+        "place_order":   "TradingBot.place_order",
+    },
+    "TravelBookingAPI": {
+        "book_flight":      "TravelBookingAPI.book_flight",
+        "book_hotel":       "TravelBookingAPI.book_hotel",
+        "cancel_booking":   "TravelBookingAPI.cancel_booking",
+        "check_in":         "TravelBookingAPI.check_in",
+        "get_flight_status": "TravelBookingAPI.get_flight_status",
+    },
+    "TravelAPI": {
+        "book_flight":      "TravelAPI.book_flight",
+        "book_hotel":       "TravelAPI.book_hotel",
+        "cancel_booking":   "TravelAPI.cancel_booking",
+        "check_in":         "TravelAPI.check_in",
+        "get_flight_status": "TravelAPI.get_flight_status",
+    },
+    "VehicleControlAPI": {
+        "accelerate":     "VehicleControlAPI.accelerate",
+        "brake":          "VehicleControlAPI.brake",
+        "lock":           "VehicleControlAPI.lock",
+        "unlock":         "VehicleControlAPI.unlock",
+        "start_engine":   "VehicleControlAPI.start_engine",
+        "stop_engine":    "VehicleControlAPI.stop_engine",
+        "set_climate":    "VehicleControlAPI.set_climate",
+        "set_navigation": "VehicleControlAPI.set_navigation",
+    },
 }
 
 
@@ -69,6 +145,13 @@ class BFCLHandler:
         self._extractor = extractor or ArgumentExtractor()
         self._threshold = confidence_threshold
         self._irr_threshold = irrelevance_threshold
+        self.language   = "python"  # Set per-category by runner
+
+    def _extract_args(self, query: str, func_def: dict) -> dict:
+        """Call extractor with language awareness."""
+        if hasattr(self._extractor, 'extract') and 'language' in self._extractor.extract.__code__.co_varnames:
+            return self._extractor.extract(query, func_def, language=self.language)
+        return self._extract_args(query, func_def)
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -115,7 +198,7 @@ class BFCLHandler:
         if func_name:
             func_def = self._find_def(func_defs, func_name)
             if func_def:
-                args = self._extractor.extract(query, func_def)
+                args = self._extract_args(query, func_def)
 
         return {
             "tool":          func_name,
@@ -158,7 +241,7 @@ class BFCLHandler:
         for fname in result.functions:
             func_def = self._find_def(func_defs, fname)
             if func_def:
-                all_args[fname] = self._extractor.extract(query, func_def)
+                all_args[fname] = self._extract_args(query, func_def)
 
         return {
             "tools":         result.functions,
@@ -191,7 +274,7 @@ class BFCLHandler:
         if func_name:
             func_def = self._find_def(func_defs, func_name)
             if func_def:
-                args = self._extractor.extract(query, func_def)
+                args = self._extract_args(query, func_def)
 
         route_result = {
             "tool":          func_name,
@@ -208,13 +291,20 @@ class BFCLHandler:
         entry: dict,
         func_defs: list[dict],
     ) -> dict[str, Any]:
-        """Two-stage multi-turn routing with per-class exemplar-based HDC scoring.
+        """Multi-turn routing via CognitiveLoop with SDK packs and pack-based routing.
 
-        Stage 1: Detect which API class a turn's query targets.
-        Stage 2: Score against that class's exemplar Glyphs + DomainConfig keywords.
+        Pipeline per turn:
+          1. Detect API class from query (extract_api_class via pack domain_signals)
+          2. Pack canonical routing: extract_pack_actions() → map to class functions
+          3. DomainConfig multi_action_keywords → additional functions
+          4. HDC scorer fallback when pack matching finds nothing
+          5. Exclusion rules filter confusable pairs
 
-        Each class has pre-built exemplars (3 weighted BoW variants per function)
-        that provide diverse matching surfaces for HDC cosine similarity.
+        CognitiveLoop with packs provides:
+          - DeductiveLayer: prerequisite detection from state pack transitions
+          - InductiveLayer: learned patterns from state pack patterns
+          - IdeaSpace: episodic memory across turns
+          - ConversationState: Hebbian pathway tracking
 
         Args:
             entry:     Multi-turn entry dict with "question", "involved_classes".
@@ -234,9 +324,17 @@ class BFCLHandler:
             cls = f["name"].split(".")[0]
             class_funcs.setdefault(cls, []).append(f)
 
-        # Create per-class scorers — prefer exemplar-based, fallback to func_def
+        # Build available function name sets per class
+        class_available: dict[str, set[str]] = {
+            cls: {f["name"] for f in funcs}
+            for cls, funcs in class_funcs.items()
+        }
+
+        # Create per-class CognitiveLoops with packs + scorers as fallback
+        loops: dict[str, CognitiveLoop] = {}
         scorers: dict[str, BFCLScorer] = {}
         for cls in class_funcs:
+            # Scorer for fallback
             scorer = BFCLScorer()
             exemplars = self._load_exemplars(cls)
             if exemplars:
@@ -244,6 +342,18 @@ class BFCLHandler:
             else:
                 scorer.configure(class_funcs[cls])
             scorers[cls] = scorer
+
+            # CognitiveLoop with domain packs
+            domain_config = CLASS_DOMAIN_CONFIGS.get(cls)
+            packs = _CLASS_TO_PACKS.get(cls, [])
+            loop = CognitiveLoop(
+                packs=packs,
+                domain_config=domain_config,
+                model_scorer=scorer,
+                confidence_threshold=0.10,
+            )
+            loop.begin(functions=self._to_loop_functions(class_funcs[cls]))
+            loops[cls] = loop
 
         turns = entry.get("question", [])
         per_turn: list[dict] = []
@@ -261,33 +371,70 @@ class BFCLHandler:
 
             # Stage 1: Detect API class from query
             matched_cls = extract_api_class(query, involved_classes)
+            available = class_available.get(matched_cls, set())
 
-            # Stage 2: Score against class's exemplar Glyphs
-            scorer = scorers.get(matched_cls)
-            if scorer is None:
-                per_turn.append({"functions": [], "confidence": 0.0})
-                continue
+            # Stage 2: Pack canonical routing
+            # Intent packs provide rich NL synonym/phrase matching.
+            # extract_pack_actions returns canonical action names (e.g., "cat", "tail").
+            pack_canonicals = extract_pack_actions(query)
+            overrides = _PACK_FUNC_OVERRIDES.get(matched_cls, {})
 
-            result = scorer.score_multi(query)
-            funcs = list(result.functions)  # multiple matches via gap analysis
+            pack_funcs: list[str] = []
+            for canonical in pack_canonicals:
+                # Check override mapping first (non-obvious function names)
+                if canonical in overrides:
+                    fname = overrides[canonical]
+                    if fname in available and fname not in pack_funcs:
+                        pack_funcs.append(fname)
+                    continue
+                # Auto-derive: {class}.{canonical} for direct matches
+                fname = f"{matched_cls}.{canonical}"
+                if fname in available and fname not in pack_funcs:
+                    pack_funcs.append(fname)
 
-            # Multi-function: check DomainConfig multi_action_keywords
+            # Stage 3: DomainConfig multi_action_keywords (secondary)
             domain_config = CLASS_DOMAIN_CONFIGS.get(matched_cls)
             if domain_config and domain_config.multi_action_keywords:
-                available = {f["name"] for f in class_funcs.get(matched_cls, [])}
                 query_lower = query.lower()
                 for fname, patterns in domain_config.multi_action_keywords.items():
-                    if fname in funcs or fname not in available:
+                    if fname in pack_funcs or fname not in available:
                         continue
                     for pat in patterns:
                         if pat in query_lower:
-                            funcs.append(fname)
+                            pack_funcs.append(fname)
                             break
 
+            # Stage 4: HDC scorer fallback when pack + keywords find nothing
+            if not pack_funcs:
+                scorer = scorers.get(matched_cls)
+                if scorer:
+                    result = scorer.score(query)
+                    if result.functions:
+                        pack_funcs = [result.functions[0]]
+
+            # Stage 5: Exclusion rules
+            if domain_config and domain_config.exclusion_rules:
+                to_remove: set[str] = set()
+                for specific, generics in domain_config.exclusion_rules.items():
+                    if specific in pack_funcs:
+                        for g in generics:
+                            if g in pack_funcs:
+                                to_remove.add(g)
+                pack_funcs = [f for f in pack_funcs if f not in to_remove]
+
+            # Feed the query through CognitiveLoop for state tracking
+            loop = loops.get(matched_cls)
+            if loop:
+                loop.step(query)
+
             per_turn.append({
-                "functions": funcs,
-                "confidence": result.confidence,
+                "functions": pack_funcs,
+                "confidence": 0.8 if pack_funcs else 0.0,
             })
+
+        # End all loops
+        for loop in loops.values():
+            loop.end()
 
         elapsed = (time.perf_counter() - t0) * 1000
 
