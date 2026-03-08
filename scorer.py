@@ -311,3 +311,80 @@ class BFCLScorer:
             selected.append(scores[i]["function"])
 
         return selected
+
+
+# ---------------------------------------------------------------------------
+# TaskScorer — Task-level Glyphh model (query → function sequence)
+# ---------------------------------------------------------------------------
+
+class TaskScorer:
+    """Task-level Glyphh model: query → function sequence.
+
+    Pure HDC model following the same architecture as BFCLScorer.
+    Each task exemplar is a query encoded as a Glyph — same encode_query()
+    pipeline, same 4-level scoring strategy. The function sequence is
+    metadata attached to the Glyph, not part of the encoding.
+
+    This is the same pattern as pipedream: exemplar Glyphs in storage,
+    query Glyph scored against them via hierarchical cosine similarity.
+
+    Two-tier architecture:
+      Tier 1: TaskScorer — GQL FIND SIMILAR → function sequence
+      Tier 2: CognitiveLoop — state tracking, memory, deduction
+      LLM: fills argument values for the matched sequence
+    """
+
+    CONFIDENCE_THRESHOLD = 0.20
+
+    def __init__(self) -> None:
+        self._encoder = Encoder(ENCODER_CONFIG)
+        self._strategy = BFCLScoringStrategy()
+        # Each entry: (Glyph, function_list)
+        self._task_glyphs: dict[str, tuple[Glyph, list[str]]] = {}
+
+    def configure(self, task_exemplars: list[dict]) -> None:
+        """Encode task exemplars as Glyphs using the standard query encoder.
+
+        Each exemplar's query text is encoded exactly as encode_query() would
+        encode an incoming user query — same vector space, same roles.
+        The function sequence is metadata, not part of the Glyph.
+        """
+        self._task_glyphs.clear()
+
+        for i, ex in enumerate(task_exemplars):
+            query_text = ex.get("query", ex.get("description", ""))
+            q_dict = encode_query(query_text)
+            glyph = self._encoder.encode(Concept(
+                name=q_dict["name"],
+                attributes=q_dict["attributes"],
+            ))
+            functions = ex["functions"]
+            pattern_key = ",".join(ex["pattern"])
+            key = f"{pattern_key}__{i}"
+            self._task_glyphs[key] = (glyph, functions)
+
+    def score(self, query: str) -> tuple[list[str], float]:
+        """GQL FIND SIMILAR: score query against all task exemplars.
+
+        Returns:
+            (function_sequence, confidence)
+        """
+        if not self._task_glyphs:
+            return [], 0.0
+
+        q_dict = encode_query(query)
+        q_glyph = self._encoder.encode(Concept(
+            name=q_dict["name"],
+            attributes=q_dict["attributes"],
+        ))
+
+        best_funcs: list[str] = []
+        best_score = 0.0
+
+        for key, (t_glyph, functions) in self._task_glyphs.items():
+            sim = self._strategy.score_pair(q_glyph, t_glyph)
+            if sim > best_score:
+                best_score = sim
+                best_funcs = functions
+
+        return best_funcs, best_score

@@ -23,7 +23,7 @@ from typing import Any
 
 from glyphh import CognitiveLoop
 
-from scorer import BFCLScorer
+from scorer import BFCLScorer, TaskScorer
 from extractor import ArgumentExtractor
 from domain_config import CLASS_DOMAIN_CONFIGS
 from intent import extract_api_class, extract_pack_actions
@@ -268,6 +268,7 @@ class BFCLHandler:
         self._irr_threshold = irrelevance_threshold
         self.language   = "python"  # Set per-category by runner
         self._scorer_cache: dict[str, BFCLScorer] = {}  # cls → pre-built scorer
+        self._task_scorer_cache: dict[str, TaskScorer] = {}  # cls → task scorer
 
     def _extract_args(self, query: str, func_def: dict) -> dict:
         """Call extractor with language awareness."""
@@ -434,10 +435,12 @@ class BFCLHandler:
             for cls, funcs in class_funcs.items()
         }
 
-        # Build per-class CognitiveLoops and scorers (cached across entries)
+        # Build per-class CognitiveLoops, scorers, and task scorers (cached)
         loops: dict[str, CognitiveLoop] = {}
         scorers: dict[str, BFCLScorer] = {}
+        task_scorers: dict[str, TaskScorer] = {}
         for cls in class_funcs:
+            # Function-level scorer (for CognitiveLoop classifier)
             if cls in self._scorer_cache:
                 scorer = self._scorer_cache[cls]
             else:
@@ -449,6 +452,17 @@ class BFCLHandler:
                     scorer.configure(class_funcs[cls])
                 self._scorer_cache[cls] = scorer
             scorers[cls] = scorer
+
+            # Task-level scorer (query → function sequence)
+            if cls in self._task_scorer_cache:
+                task_scorers[cls] = self._task_scorer_cache[cls]
+            else:
+                task_exs = self._load_task_exemplars(cls)
+                if task_exs:
+                    ts = TaskScorer()
+                    ts.configure(task_exs)
+                    self._task_scorer_cache[cls] = ts
+                    task_scorers[cls] = ts
 
             packs = _CLASS_TO_PACKS.get(cls, [])
             domain_config = CLASS_DOMAIN_CONFIGS.get(cls)
@@ -467,6 +481,7 @@ class BFCLHandler:
             "class_funcs": class_funcs,
             "class_available": class_available,
             "loops": loops,
+            "task_scorers": task_scorers,
             "scorers": scorers,
         }
 
@@ -475,104 +490,71 @@ class BFCLHandler:
         query: str,
         ctx: dict[str, Any],
     ) -> list[str]:
-        """Route a single turn using multi-stage pipeline with CognitiveLoop deduction.
+        """Route a single turn: TaskScorer → CognitiveLoop fallback.
 
-        Pipeline:
-          1. Detect API class
-          2. DomainConfig multi_action_keywords (multi-function detection)
-          3. Pack canonical routing (secondary)
-          4. HDC scorer fallback
-          5. Exclusion rules
-          6. CognitiveLoop deduction (state-aware prerequisite injection)
+        Two-tier architecture:
+          Tier 1: TaskScorer — matches query against task-level exemplars
+                  Returns full function sequence (stored procedure)
+          Tier 2: CognitiveLoop.route() — PERCEIVE + RECALL + DEDUCE + RESOLVE
+                  Falls back here when TaskScorer confidence is low
 
         State must be updated after arg extraction via update_turn_state().
 
         Returns list of class-prefixed function names.
         """
         involved_classes = ctx["involved_classes"]
-        class_available = ctx["class_available"]
-        scorers = ctx["scorers"]
         loops = ctx["loops"]
+        task_scorers = ctx.get("task_scorers", {})
 
-        # Stage 1: Detect API class
+        # Detect API class
         matched_cls = extract_api_class(query, involved_classes)
+        class_available = ctx["class_available"]
         available = class_available.get(matched_cls, set())
 
-        # Stage 2: DomainConfig multi_action_keywords (PRIMARY)
-        domain_config = CLASS_DOMAIN_CONFIGS.get(matched_cls)
-        pack_funcs: list[str] = []
-        if domain_config and domain_config.multi_action_keywords:
-            query_lower = query.lower()
-            for fname, patterns in domain_config.multi_action_keywords.items():
-                if fname not in available:
-                    continue
-                for pat in patterns:
-                    if pat in query_lower:
-                        if fname not in pack_funcs:
-                            pack_funcs.append(fname)
-                        break
+        # Tier 1: Task-level exemplar matching
+        ts = task_scorers.get(matched_cls)
+        if ts:
+            task_funcs, task_conf = ts.score(query)
+            if task_funcs and task_conf >= TaskScorer.CONFIDENCE_THRESHOLD:
+                # Filter to available functions
+                valid = [f for f in task_funcs if f in available]
+                if valid:
+                    # Still run loop.route() for memory recording (episodic + deductive)
+                    loop = loops.get(matched_cls)
+                    if loop:
+                        loop.route(query)  # record turn in memory, ignore result
+                    return valid
 
-        # Stage 3: Pack canonical routing (secondary)
-        pack_canonicals = extract_pack_actions(query)
-        overrides = _PACK_FUNC_OVERRIDES.get(matched_cls, {})
-        for canonical in pack_canonicals:
-            if canonical in overrides:
-                fname = overrides[canonical]
-            else:
-                fname = f"{matched_cls}.{canonical}"
-            if fname in available and fname not in pack_funcs:
-                pack_funcs.append(fname)
-
-        # Stage 4: HDC scorer fallback (use score_multi for multi-function)
-        if not pack_funcs:
-            scorer = scorers.get(matched_cls)
-            if scorer:
-                result = scorer.score_multi(query)
-                if result.functions:
-                    pack_funcs = list(result.functions)
-
-        # Stage 5: Exclusion rules
-        if domain_config and domain_config.exclusion_rules:
-            to_remove: set[str] = set()
-            for specific, generics in domain_config.exclusion_rules.items():
-                if specific in pack_funcs:
-                    for g in generics:
-                        if g in pack_funcs:
-                            to_remove.add(g)
-            pack_funcs = [f for f in pack_funcs if f not in to_remove]
-
-        # Stage 6: CognitiveLoop deduction with state tracking
+        # Tier 2: CognitiveLoop full pipeline
         loop = loops.get(matched_cls)
         if loop:
-            current_state = loop._state.get("primary", "")
-            deduction = loop.deductive.deduce(
-                query=query, current_state=current_state,
-            )
-            if deduction.get("prerequisites"):
-                # Resolve prerequisite action names through action_to_func mapping
-                action_map = domain_config.action_to_func if domain_config else {}
-                for prereq in deduction["prerequisites"]:
-                    prereq_func = action_map.get(prereq, f"{matched_cls}.{prereq}")
-                    if prereq_func in available and prereq_func not in pack_funcs:
-                        pack_funcs.insert(0, prereq_func)
+            result = loop.route(query)
+            if result.action == "CALL":
+                return [f for call in result.calls for f in call.keys()]
 
-        return pack_funcs
+        # Fallback: no loop for this class, use scorer directly
+        scorers = ctx["scorers"]
+        scorer = scorers.get(matched_cls)
+        if scorer:
+            result = scorer.score_multi(query)
+            if result.functions:
+                return [f for f in result.functions if f in available]
+
+        return []
 
     @staticmethod
     def update_turn_state(
         ctx: dict[str, Any],
         calls: list[dict],
     ) -> None:
-        """Update CognitiveLoop state after arg extraction.
+        """Update CognitiveLoop state after external arg extraction.
 
-        Feed the extracted function calls (with args) back to the loop
-        so state_effects fire (e.g. cd updates CWD). Also observe()
-        actions in the deductive layer so it can track directing vs
-        operating action history for prerequisite injection.
+        Uses loop.apply_state() to fire state effects (e.g. cd updates CWD).
+        Note: route() already calls _record_turn() which feeds deductive.observe(),
+        so the deductive layer already knows what actions were routed. apply_state()
+        only handles the state mutation (CWD change etc.) from the actual args.
         """
         loops = ctx["loops"]
-        # Collect actions per class for deductive observation
-        class_actions: dict[str, list[str]] = {}
         for call in calls:
             for fname, args in call.items():
                 if not isinstance(args, dict):
@@ -580,18 +562,8 @@ class BFCLHandler:
                 for cls, loop in loops.items():
                     prefixed = f"{cls}.{fname}"
                     if prefixed in (loop._available_funcs or {}):
-                        loop._update_state([{prefixed: args}])
-                        class_actions.setdefault(cls, []).append(fname)
+                        loop.apply_state([{prefixed: args}])
                         break
-
-        # Feed actions to deductive layer for temporal tracking
-        for cls, actions in class_actions.items():
-            loop = loops[cls]
-            current_state = loop._state.get("primary", "")
-            loop.deductive.observe(
-                state=current_state,
-                actions=actions,
-            )
 
     def route_multi_turn(
         self,
@@ -636,6 +608,23 @@ class BFCLHandler:
         if not folder:
             return []
         path = _CLASSES_DIR / folder / "exemplars.jsonl"
+        if not path.exists():
+            return []
+        exemplars = []
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    exemplars.append(json.loads(line))
+        return exemplars
+
+    @staticmethod
+    def _load_task_exemplars(cls: str) -> list[dict]:
+        """Load task-level exemplars from classes/{folder}/task_exemplars.jsonl."""
+        folder = _CLASS_TO_FOLDER.get(cls)
+        if not folder:
+            return []
+        path = _CLASSES_DIR / folder / "task_exemplars.jsonl"
         if not path.exists():
             return []
         exemplars = []
