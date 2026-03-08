@@ -43,6 +43,15 @@ class BFCLScoringStrategy:
     _W_SEGMENT = 0.25
     _W_ROLE    = 0.60
 
+    # Per-role weights: action gets 2x to better distinguish Find vs Buy/Book
+    _ROLE_WEIGHTS: dict[str, float] = {
+        "action":        2.0,
+        "target":        1.0,
+        "function_name": 1.5,
+        "description":   1.0,
+        "parameters":    0.8,
+    }
+
     def score_pair(self, q: Glyph, f: Glyph) -> float:
         """Compute weighted hierarchical similarity between query and function Glyphs."""
         # Global cortex
@@ -73,8 +82,9 @@ class BFCLScoringStrategy:
                     )))
         seg_sim = sum(seg_sims) / len(seg_sims) if seg_sims else 0.0
 
-        # Role-level average (most discriminating)
-        role_sims = []
+        # Role-level weighted average (most discriminating)
+        role_weighted_sum = 0.0
+        role_weight_total = 0.0
         for lname in q.layers:
             if lname not in f.layers:
                 continue
@@ -85,8 +95,11 @@ class BFCLScoringStrategy:
                     if rname in f.layers[lname].segments[sname].roles:
                         qr = q.layers[lname].segments[sname].roles[rname].data
                         fr = f.layers[lname].segments[sname].roles[rname].data
-                        role_sims.append(float(cosine_similarity(qr, fr)))
-        role_sim = sum(role_sims) / len(role_sims) if role_sims else 0.0
+                        sim = float(cosine_similarity(qr, fr))
+                        w = self._ROLE_WEIGHTS.get(rname, 1.0)
+                        role_weighted_sum += sim * w
+                        role_weight_total += w
+        role_sim = role_weighted_sum / role_weight_total if role_weight_total > 0 else 0.0
 
         return (
             self._W_CORTEX  * cortex_sim

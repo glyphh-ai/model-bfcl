@@ -399,6 +399,28 @@ _VERB_MAP: dict[str, str] = {
     "transfer": "move", "duplicate": "copy", "secure": "save",
     "organize": "sort", "inspect": "check",
     "archive": "save", "pop": "find",
+    # Live function matching — verbs that map to search/find family
+    "attend": "find", "attending": "find",
+    "browse": "find", "browsing": "find",
+    "explore": "find", "exploring": "find",
+    "interested": "find",
+    "looking": "find",
+    "recommend": "find", "suggest": "find",
+    "available": "find",
+    "hire": "find", "hiring": "find",
+    "need": "find",
+    # Live function matching — verbs that map to create/action family
+    "buy": "create", "buying": "create",
+    "purchase": "create", "purchasing": "create",
+    "reserve": "create", "reserving": "create",
+    "schedule": "create", "scheduling": "create",
+    "rent": "create", "renting": "create",
+    "pay": "send", "paying": "send",
+    "request": "send", "requesting": "send",
+    # Live function matching — media/interaction verbs
+    "play": "run", "playing": "run",
+    "watch": "get", "watching": "get",
+    "listen": "get", "listening": "get",
 }
 
 # Impact ranking: when multiple verbs found, pick highest-impact one.
@@ -416,6 +438,10 @@ _IMPACT_RANK: dict[str, int] = {
     "add": 4, "insert": 4, "append": 4,
     "get": 3, "fetch": 3, "retrieve": 3, "list": 3, "read": 3,
     "open": 2, "close": 2, "start": 2, "stop": 2, "run": 2,
+    # Live action verbs
+    "buy": 8, "purchase": 8, "reserve": 8, "schedule": 7,
+    "rent": 7, "hire": 5, "attend": 4, "browse": 4,
+    "play": 4, "watch": 3, "listen": 3, "pay": 6, "request": 5,
 }
 
 
