@@ -176,7 +176,7 @@ class BFCLModelScorer:
         self._func_glyphs: dict[str, Glyph] = {}
 
     def configure(self, func_defs: list[dict[str, Any]], class_dir: str | None = None) -> None:
-        """Encode function definitions into GlyphSpace."""
+        """Encode function definitions into GlyphSpace using per-class encoder."""
         class_name = _detect_class(func_defs, class_dir=class_dir)
         if not class_name:
             raise ValueError("Cannot detect API class from function definitions")
@@ -196,6 +196,33 @@ class BFCLModelScorer:
         self._func_glyphs = {}
         for fd in func_defs:
             concept_dict = encode_fn(fd)
+            glyph = self._encoder.encode(
+                Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
+            )
+            self._func_glyphs[fd["name"]] = glyph
+
+        self._space.configure(self._func_glyphs)
+
+    def configure_generic(self, func_defs: list[dict[str, Any]]) -> None:
+        """Encode arbitrary function definitions using the top-level encoder.
+
+        Unlike configure(), this does not require class-prefixed function names.
+        Uses the generic BFCL encoder (encoder.py + intent.py) which works with
+        any function set — non-live, live, or arbitrary schemas.
+        """
+        from encoder import ENCODER_CONFIG, encode_function, encode_query
+
+        self._class_prefix = ""
+        self._class_dir = ""
+        self._encode_query_fn = encode_query
+
+        self._encoder = Encoder(ENCODER_CONFIG)
+        strategy = LayerWeightedStrategy(ENCODER_CONFIG)
+        self._space = GlyphSpace(scoring_strategy=strategy)
+
+        self._func_glyphs = {}
+        for fd in func_defs:
+            concept_dict = encode_function(fd)
             glyph = self._encoder.encode(
                 Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
             )
