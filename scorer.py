@@ -1,390 +1,263 @@
-"""
-Pure HDC scorer for BFCL function routing.
+"""Glyphh Ada 1.0 — BFCL Model Scorer.
 
-BFCLScorer implements the ModelScorer protocol from glyphh.cognitive.
-Functions are first-class Glyphs encoded into the Glyphh HDC space.
-No LLM anywhere.
+Implements ModelScorer protocol using GlyphSpace + per-class encoders.
+Each API class has its own intent.py + encoder.py; this scorer detects
+the class from the function definitions and delegates accordingly.
 
-Scoring: 4-level hierarchical cosine similarity
-  cortex  (5%)  — global bundled representation
-  layer  (10%)  — per-layer cortex
-  segment (25%) — per-segment cortex
-  role   (60%)  — per-role vectors (leaf, most discriminating)
+Usage:
+    scorer = BFCLModelScorer()
+    scorer.configure(func_defs)
+    result = scorer.score("list files in the directory")
 """
 
 from __future__ import annotations
 
+import importlib.util
+import pickle
+import sys
+from pathlib import Path
 from typing import Any
+
+import psycopg2
 
 from glyphh import Encoder
 from glyphh.core.ops import cosine_similarity
 from glyphh.core.types import Concept, Glyph
+from glyphh.cognitive.glyph_space import GlyphSpace, ScoringStrategy
 from glyphh.cognitive.model_scorer import ScorerResult
 
-from encoder import ENCODER_CONFIG, encode_function, encode_exemplar, encode_query
+DB_DSN = "postgresql://postgres:postgres@localhost:5434/bfcl"
+
+_CLASSES_DIR = Path(__file__).parent / "classes"
+
+# Map class prefixes to directory names
+_CLASS_DIR_MAP = {
+    "GorillaFileSystem": "gorilla_file_system",
+    "TwitterAPI": "twitter_api",
+    "PostingAPI": "posting_api",
+    "MessageAPI": "message_api",
+    "TicketAPI": "ticket_api",
+    "MathAPI": "math_api",
+    "TradingBot": "trading_bot",
+    "TravelAPI": "travel_booking",
+    "VehicleControlAPI": "vehicle_control",
+}
+
+# Reverse: directory name → class prefix
+_DIR_TO_CLASS = {v: k for k, v in _CLASS_DIR_MAP.items()}
+
+# Func doc JSON files per class
+_FUNC_DOC_DIR = Path(__file__).parent / "data" / "bfcl" / "multi_turn_func_doc"
+
+# Module cache — load each class module only once
+_MODULE_CACHE: dict[str, Any] = {}
 
 
-# ---------------------------------------------------------------------------
-# BFCLScoringStrategy — 4-level hierarchical similarity
-# ---------------------------------------------------------------------------
+def _load_class_module(class_dir: str, module_name: str):
+    """Load a module from a class directory using importlib (no sys.path pollution).
 
-class BFCLScoringStrategy:
-    """4-level hierarchical similarity between two Glyphs.
+    Critical: each class's encoder.py does `from intent import ...` which uses
+    the plain 'intent' module name. We must evict stale modules before loading
+    a new class to prevent cross-class contamination.
+    """
+    cache_key = f"{class_dir}_{module_name}"
+    if cache_key in _MODULE_CACHE:
+        return _MODULE_CACHE[cache_key]
 
-    Weights: cortex 5% + layer 10% + segment 25% + role 60%
+    mod_path = _CLASSES_DIR / class_dir / f"{module_name}.py"
+    if not mod_path.exists():
+        raise FileNotFoundError(f"No {module_name}.py in {class_dir}")
 
-    The role level (60%) is the most discriminating: it compares each
-    named role vector individually (action, target, function_name,
-    description, parameters), giving a nuanced per-field similarity.
+    unique_name = f"_bfcl_{class_dir}_{module_name}"
+    spec = importlib.util.spec_from_file_location(unique_name, mod_path)
+    mod = importlib.util.module_from_spec(spec)
+
+    # Evict plain-name modules that encoder.py imports via `from intent import ...`
+    # to prevent cross-class contamination between different class directories.
+    _stale = {}
+    for plain_name in ("intent", "encoder"):
+        if plain_name in sys.modules:
+            _stale[plain_name] = sys.modules.pop(plain_name)
+
+    class_path = str(_CLASSES_DIR / class_dir)
+    inserted = class_path not in sys.path
+    if inserted:
+        sys.path.insert(0, class_path)
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        if inserted and class_path in sys.path:
+            sys.path.remove(class_path)
+
+    sys.modules[unique_name] = mod
+    _MODULE_CACHE[cache_key] = mod
+    return mod
+
+
+def _detect_class(func_defs: list[dict], class_dir: str | None = None) -> str | None:
+    """Detect API class from function name prefixes or explicit class_dir."""
+    if class_dir:
+        return _DIR_TO_CLASS.get(class_dir)
+    for fd in func_defs:
+        name = fd.get("name", "")
+        if "." in name:
+            prefix = name.split(".")[0]
+            if prefix in _CLASS_DIR_MAP:
+                return prefix
+    return None
+
+
+class LayerWeightedStrategy:
+    """Layer-weighted scoring using EncoderConfig weights.
+
+    Computes per-layer scores (weighted average of role similarities),
+    then combines layers using their similarity_weight.
     """
 
-    _W_CORTEX  = 0.05
-    _W_LAYER   = 0.10
-    _W_SEGMENT = 0.25
-    _W_ROLE    = 0.60
+    def __init__(self, encoder_config):
+        self._config = encoder_config
 
-    def score_pair(self, q: Glyph, f: Glyph) -> float:
-        """Compute weighted hierarchical similarity between query and function Glyphs."""
-        # Global cortex
-        cortex_sim = float(cosine_similarity(
-            q.global_cortex.data, f.global_cortex.data,
-        ))
+    def score_pair(self, query_glyph: Glyph, target_glyph: Glyph) -> float:
+        layer_configs = {lc.name: lc for lc in self._config.layers}
+        total_score = 0.0
+        total_weight = 0.0
 
-        # Layer-level cortex average
-        layer_sims = []
-        for lname in q.layers:
-            if lname in f.layers:
-                layer_sims.append(float(cosine_similarity(
-                    q.layers[lname].cortex.data,
-                    f.layers[lname].cortex.data,
-                )))
-        layer_sim = sum(layer_sims) / len(layer_sims) if layer_sims else 0.0
-
-        # Segment-level cortex average
-        seg_sims = []
-        for lname in q.layers:
-            if lname not in f.layers:
+        for lname in query_glyph.layers:
+            if lname not in target_glyph.layers:
                 continue
-            for sname in q.layers[lname].segments:
-                if sname in f.layers[lname].segments:
-                    seg_sims.append(float(cosine_similarity(
-                        q.layers[lname].segments[sname].cortex.data,
-                        f.layers[lname].segments[sname].cortex.data,
-                    )))
-        seg_sim = sum(seg_sims) / len(seg_sims) if seg_sims else 0.0
-
-        # Role-level average (most discriminating)
-        role_sims = []
-        for lname in q.layers:
-            if lname not in f.layers:
+            lc = layer_configs.get(lname)
+            if not lc:
                 continue
-            for sname in q.layers[lname].segments:
-                if sname not in f.layers[lname].segments:
+            lw = lc.similarity_weight
+
+            role_score = 0.0
+            role_weight = 0.0
+            for seg_cfg in lc.segments:
+                sname = seg_cfg.name
+                ql = query_glyph.layers[lname]
+                fl = target_glyph.layers[lname]
+                if sname not in ql.segments or sname not in fl.segments:
                     continue
-                for rname in q.layers[lname].segments[sname].roles:
-                    if rname in f.layers[lname].segments[sname].roles:
-                        qr = q.layers[lname].segments[sname].roles[rname].data
-                        fr = f.layers[lname].segments[sname].roles[rname].data
-                        role_sims.append(float(cosine_similarity(qr, fr)))
-        role_sim = sum(role_sims) / len(role_sims) if role_sims else 0.0
+                for role_cfg in seg_cfg.roles:
+                    rname = role_cfg.name
+                    qs = ql.segments[sname]
+                    fs = fl.segments[sname]
+                    if rname in qs.roles and rname in fs.roles:
+                        sim = float(cosine_similarity(
+                            qs.roles[rname].data, fs.roles[rname].data))
+                        rw = role_cfg.similarity_weight
+                        role_score += sim * rw
+                        role_weight += rw
 
-        return (
-            self._W_CORTEX  * cortex_sim
-            + self._W_LAYER   * layer_sim
-            + self._W_SEGMENT * seg_sim
-            + self._W_ROLE    * role_sim
-        )
+            if role_weight > 0:
+                layer_sim = role_score / role_weight
+                total_score += layer_sim * lw
+                total_weight += lw
+
+        return total_score / total_weight if total_weight > 0 else 0.0
 
 
-# ---------------------------------------------------------------------------
-# BFCLScorer — ModelScorer implementation
-# ---------------------------------------------------------------------------
+class BFCLModelScorer:
+    """BFCL model scorer — routes queries to functions using per-class Glyphh models.
 
-class BFCLScorer:
-    """Pure HDC function scorer for BFCL.
-
-    Pipeline:
-      configure(func_defs) → encode each function as a Glyph
-      score(query)         → encode query as a Glyph, score against all functions
-      score_multi(query)   → same but select multiple functions via gap analysis
-
-    No LLM. No external service calls. All computation is deterministic HDC.
+    Implements the ModelScorer protocol:
+        configure(func_defs) → encode functions into GlyphSpace
+        score(query) → ScorerResult with ranked functions
     """
 
-    # Queries below this similarity are considered irrelevant
-    IRRELEVANCE_THRESHOLD = 0.22
+    IRRELEVANCE_THRESHOLD = 0.15
 
-    # Multi-function gap analysis
-    MULTI_GAP_RATIO      = 0.75   # relative drop > 75% → stop selecting
-    MULTI_FALLBACK_RATIO = 0.20   # absolute ratio to best < 20% → stop
-
-    def __init__(self) -> None:
-        self._encoder   = Encoder(ENCODER_CONFIG)
-        self._strategy  = BFCLScoringStrategy()
+    def __init__(self):
+        self._encoder: Encoder | None = None
+        self._space: GlyphSpace | None = None
+        self._encode_query_fn = None
+        self._class_prefix: str = ""
+        self._class_dir: str = ""
         self._func_glyphs: dict[str, Glyph] = {}
-        self._func_defs:   dict[str, dict]  = {}
-        self._locked: bool = False  # True when configured from exemplars
 
-    # ── ModelScorer protocol ─────────────────────────────────────────────
+    def configure(self, func_defs: list[dict[str, Any]], class_dir: str | None = None) -> None:
+        """Encode function definitions into GlyphSpace."""
+        class_name = _detect_class(func_defs, class_dir=class_dir)
+        if not class_name:
+            raise ValueError("Cannot detect API class from function definitions")
 
-    def configure(self, func_defs: list[dict[str, Any]]) -> None:
-        """Encode function definitions into Glyphs."""
-        self._func_defs = {f["name"]: f for f in func_defs}
-        if self._locked:
-            return  # Exemplar glyphs already loaded — don't overwrite
+        self._class_prefix = class_name
+        self._class_dir = _CLASS_DIR_MAP[class_name]
 
-        self._func_glyphs.clear()
+        encoder_mod = _load_class_module(self._class_dir, "encoder")
+        config = encoder_mod.ENCODER_CONFIG
+        encode_fn = encoder_mod.encode_function
+        self._encode_query_fn = encoder_mod.encode_query
 
-        for func_def in func_defs:
-            concept_dict = encode_function(func_def)
-            glyph = self._encoder.encode(Concept(
-                name=concept_dict["name"],
-                attributes=concept_dict["attributes"],
-            ))
-            self._func_glyphs[func_def["name"]] = glyph
+        self._encoder = Encoder(config)
+        strategy = LayerWeightedStrategy(config)
+        self._space = GlyphSpace(scoring_strategy=strategy)
 
-    def configure_from_exemplars(self, exemplars: list[dict]) -> None:
-        """Encode pre-built exemplars into Glyphs.
+        self._func_glyphs = {}
+        for fd in func_defs:
+            concept_dict = encode_fn(fd)
+            glyph = self._encoder.encode(
+                Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
+            )
+            self._func_glyphs[fd["name"]] = glyph
 
-        Multiple exemplars per function: each variant encodes into a separate
-        Glyph. score() returns the function name from the best-matching
-        exemplar Glyph (stripped of variant suffix).
-
-        Locks the scorer so subsequent configure() calls (e.g. from
-        CognitiveLoop.begin()) update func_defs but don't overwrite glyphs.
-        """
-        self._func_glyphs.clear()
-        self._func_defs.clear()
-
-        for exemplar in exemplars:
-            concept_dict = encode_exemplar(exemplar)
-            glyph = self._encoder.encode(Concept(
-                name=concept_dict["name"],
-                attributes=concept_dict["attributes"],
-            ))
-            # Key by "func_name__v{N}" to allow multiple Glyphs per function
-            func_name = exemplar["function_name"]
-            variant = exemplar.get("variant", 1)
-            key = f"{func_name}__v{variant}"
-            self._func_glyphs[key] = glyph
-
-        self._locked = True
+        self._space.configure(self._func_glyphs)
 
     def score(self, query: str) -> ScorerResult:
-        """Score a query against configured functions. Returns single best match.
-
-        Always populates `functions` with the top match so callers can use it
-        with force=True. `is_irrelevant` is flagged when confidence falls below
-        IRRELEVANCE_THRESHOLD — callers decide whether to heed this flag.
-        """
-        if not self._func_glyphs:
+        """Score a query against configured functions."""
+        if not self._space or not self._encoder or not self._encode_query_fn:
             return ScorerResult()
 
-        q_glyph = self._encode_query(query)
-        scores  = self._score_all(q_glyph)
+        concept_dict = self._encode_query_fn(query)
+        query_glyph = self._encoder.encode(
+            Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
+        )
+        return self._space.find_similar(query_glyph)
 
-        if not scores:
-            return ScorerResult()
-
-        best = scores[0]
-        return ScorerResult(
-            functions=[best["function"]] if best["function"] else [],
-            confidence=best["score"],
-            all_scores=scores,
-            is_irrelevant=best["score"] < self.IRRELEVANCE_THRESHOLD,
+    def encode_query(self, query: str) -> Glyph | None:
+        if not self._encoder or not self._encode_query_fn:
+            return None
+        concept_dict = self._encode_query_fn(query)
+        return self._encoder.encode(
+            Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
         )
 
-    def score_multi(self, query: str) -> ScorerResult:
-        """Score for multiple matching functions using gap analysis.
+    def configure_from_db(self, class_dir: str) -> None:
+        """Load pre-encoded function glyphs from pgvector instead of re-encoding."""
+        class_name = _DIR_TO_CLASS.get(class_dir)
+        if not class_name:
+            raise ValueError(f"Unknown class_dir: {class_dir}")
 
-        Always runs gap analysis and returns candidate functions regardless of
-        confidence level — is_irrelevant is flagged but callers with force=True
-        can still use the candidates.
-        """
-        if not self._func_glyphs:
-            return ScorerResult()
+        self._class_prefix = class_name
+        self._class_dir = class_dir
 
-        q_glyph = self._encode_query(query)
-        scores  = self._score_all(q_glyph)
+        encoder_mod = _load_class_module(class_dir, "encoder")
+        config = encoder_mod.ENCODER_CONFIG
+        self._encode_query_fn = encoder_mod.encode_query
 
-        if not scores:
-            return ScorerResult()
+        self._encoder = Encoder(config)
+        strategy = LayerWeightedStrategy(config)
+        self._space = GlyphSpace(scoring_strategy=strategy)
 
-        is_irrelevant = scores[0]["score"] < self.IRRELEVANCE_THRESHOLD
-        selected = self._select_multiple(scores)
-        avg_conf = (
-            sum(s["score"] for s in scores if s["function"] in set(selected))
-            / len(selected)
-            if selected else scores[0]["score"]
+        conn = psycopg2.connect(DB_DSN)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT func_name, glyph_pickle FROM function_glyphs WHERE class_dir = %s",
+            (class_dir,),
         )
+        self._func_glyphs = {}
+        for func_name, glyph_bytes in cur.fetchall():
+            self._func_glyphs[func_name] = pickle.loads(bytes(glyph_bytes))
+        cur.close()
+        conn.close()
 
-        return ScorerResult(
-            functions=selected,
-            confidence=avg_conf,
-            all_scores=scores,
-            is_irrelevant=is_irrelevant,
-        )
-
-    def encode_query(self, query: str) -> Glyph:
-        """Encode a query into a Glyph (ModelScorer protocol)."""
-        return self._encode_query(query)
+        self._space.configure(self._func_glyphs)
 
     def get_func_glyphs(self) -> dict[str, Glyph]:
-        """Return encoded function Glyphs (ModelScorer protocol).
-
-        Returns empty dict when locked (exemplar mode) to force the
-        classifier to use scorer.score() fallback, which handles
-        variant deduplication correctly.
-        """
-        if self._locked:
-            return {}
         return dict(self._func_glyphs)
 
-    def scoring_strategy(self) -> BFCLScoringStrategy:
-        """Return the scoring strategy (ModelScorer protocol)."""
-        return self._strategy
-
-    # ── Internals ────────────────────────────────────────────────────────
-
-    def _encode_query(self, query: str) -> Glyph:
-        q_dict = encode_query(query)
-        return self._encoder.encode(Concept(
-            name=q_dict["name"],
-            attributes=q_dict["attributes"],
-        ))
-
-    @staticmethod
-    def _strip_variant(name: str) -> str:
-        """Strip variant suffix: 'GorillaFileSystem.mv__v1' → 'GorillaFileSystem.mv'."""
-        idx = name.find("__v")
-        return name[:idx] if idx >= 0 else name
-
-    def _score_all(self, q_glyph: Glyph) -> list[dict]:
-        """Score query against all function Glyphs, sorted descending.
-
-        When multiple exemplar variants exist for the same function,
-        keeps only the best-scoring variant per function.
-        """
-        raw_scores = [
-            {"function": fname, "score": self._strategy.score_pair(q_glyph, fglyph)}
-            for fname, fglyph in self._func_glyphs.items()
-        ]
-        raw_scores.sort(key=lambda x: x["score"], reverse=True)
-
-        # Deduplicate: keep best variant per function
-        seen: set[str] = set()
-        scores: list[dict] = []
-        for entry in raw_scores:
-            func = self._strip_variant(entry["function"])
-            if func not in seen:
-                seen.add(func)
-                scores.append({"function": func, "score": entry["score"]})
-
-        return scores
-
-    def _select_multiple(self, scores: list[dict]) -> list[str]:
-        """Select multiple functions from a sorted score list via gap analysis."""
-        if not scores:
-            return []
-        if len(scores) == 1:
-            return [scores[0]["function"]]
-
-        selected   = [scores[0]["function"]]
-        best_score = scores[0]["score"]
-
-        if best_score <= 0:
-            return []
-
-        for i in range(1, len(scores)):
-            curr = scores[i]["score"]
-            prev = scores[i - 1]["score"]
-
-            if prev <= 0:
-                break
-
-            gap   = (prev - curr) / prev
-            ratio = curr / best_score
-
-            if gap > self.MULTI_GAP_RATIO or ratio < self.MULTI_FALLBACK_RATIO:
-                break
-
-            selected.append(scores[i]["function"])
-
-        return selected
-
-
-# ---------------------------------------------------------------------------
-# TaskScorer — Task-level Glyphh model (query → function sequence)
-# ---------------------------------------------------------------------------
-
-class TaskScorer:
-    """Task-level Glyphh model: query → function sequence.
-
-    Pure HDC model following the same architecture as BFCLScorer.
-    Each task exemplar is a query encoded as a Glyph — same encode_query()
-    pipeline, same 4-level scoring strategy. The function sequence is
-    metadata attached to the Glyph, not part of the encoding.
-
-    This is the same pattern as pipedream: exemplar Glyphs in storage,
-    query Glyph scored against them via hierarchical cosine similarity.
-
-    Two-tier architecture:
-      Tier 1: TaskScorer — GQL FIND SIMILAR → function sequence
-      Tier 2: CognitiveLoop — state tracking, memory, deduction
-      LLM: fills argument values for the matched sequence
-    """
-
-    CONFIDENCE_THRESHOLD = 0.20
-
-    def __init__(self) -> None:
-        self._encoder = Encoder(ENCODER_CONFIG)
-        self._strategy = BFCLScoringStrategy()
-        # Each entry: (Glyph, function_list)
-        self._task_glyphs: dict[str, tuple[Glyph, list[str]]] = {}
-
-    def configure(self, task_exemplars: list[dict]) -> None:
-        """Encode task exemplars as Glyphs using the standard query encoder.
-
-        Each exemplar's query text is encoded exactly as encode_query() would
-        encode an incoming user query — same vector space, same roles.
-        The function sequence is metadata, not part of the Glyph.
-        """
-        self._task_glyphs.clear()
-
-        for i, ex in enumerate(task_exemplars):
-            query_text = ex.get("query", ex.get("description", ""))
-            q_dict = encode_query(query_text)
-            glyph = self._encoder.encode(Concept(
-                name=q_dict["name"],
-                attributes=q_dict["attributes"],
-            ))
-            functions = ex["functions"]
-            pattern_key = ",".join(ex["pattern"])
-            key = f"{pattern_key}__{i}"
-            self._task_glyphs[key] = (glyph, functions)
-
-    def score(self, query: str) -> tuple[list[str], float]:
-        """GQL FIND SIMILAR: score query against all task exemplars.
-
-        Returns:
-            (function_sequence, confidence)
-        """
-        if not self._task_glyphs:
-            return [], 0.0
-
-        q_dict = encode_query(query)
-        q_glyph = self._encoder.encode(Concept(
-            name=q_dict["name"],
-            attributes=q_dict["attributes"],
-        ))
-
-        best_funcs: list[str] = []
-        best_score = 0.0
-
-        for key, (t_glyph, functions) in self._task_glyphs.items():
-            sim = self._strategy.score_pair(q_glyph, t_glyph)
-            if sim > best_score:
-                best_score = sim
-                best_funcs = functions
-
-        return best_funcs, best_score
+    def scoring_strategy(self) -> LayerWeightedStrategy | None:
+        if self._class_dir:
+            encoder_mod = _load_class_module(self._class_dir, "encoder")
+            return LayerWeightedStrategy(encoder_mod.ENCODER_CONFIG)
+        return None

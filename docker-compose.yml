@@ -1,0 +1,26 @@
+# BFCL Function Caller — pgvector database
+# Start:  docker compose up -d --wait
+# Stop:   docker compose down
+# Logs:   docker compose logs -f db
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: bfcl-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-bfcl}
+    ports:
+      - "${DB_PORT:-5434}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
