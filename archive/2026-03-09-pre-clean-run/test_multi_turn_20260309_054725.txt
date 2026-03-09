@@ -1,0 +1,20 @@
+
+==================================== ERRORS ====================================
+___________________ ERROR collecting bfcl/test_multi_turn.py ___________________
+ImportError while importing test module '/Users/timmetim/development/glyphh-master/glyphh-models/bfcl/test_multi_turn.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/anaconda3/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+bfcl/test_multi_turn.py:29: in <module>
+    from tool_execution.scorer import ToolExecutionScorer, _CLASS_DIR_MAP
+bfcl/tool_execution/scorer.py:38: in <module>
+    _enc_spec.loader.exec_module(_enc_mod)
+bfcl/tool_execution/encoder.py:31: in <module>
+    from intent import extract_intent, extract_entities
+E   ImportError: cannot import name 'extract_entities' from 'intent' (/Users/timmetim/development/glyphh-master/glyphh-models/bfcl/intent.py)
+=========================== short test summary info ============================
+ERROR bfcl/test_multi_turn.py
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.19s
