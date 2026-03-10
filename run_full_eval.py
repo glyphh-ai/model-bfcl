@@ -1410,7 +1410,15 @@ def export_gorilla_results(all_results: list[CategoryResult]):
                     rid = rid.replace("memory_", gorilla_cat + "_", 1)
                 elif gorilla_cat.startswith("web_search_") and not rid.startswith(gorilla_cat):
                     rid = rid.replace("web_search_", gorilla_cat + "_", 1)
-                f.write(json.dumps({"id": rid, "result": r.get("result", [])}) + "\n")
+                entry = {"id": rid, "result": r.get("result", [])}
+                tokens = r.get("tokens", {})
+                if tokens.get("input_tokens"):
+                    entry["input_token_count"] = tokens["input_tokens"]
+                if tokens.get("output_tokens"):
+                    entry["output_token_count"] = tokens["output_tokens"]
+                if r.get("latency"):
+                    entry["latency"] = r["latency"]
+                f.write(json.dumps(entry) + "\n")
         print(f"  Exported: {fpath.relative_to(GORILLA_ROOT)}")
 
     print(f"\nGorilla results exported to {gorilla_result_dir}/")
@@ -1426,7 +1434,15 @@ def export_all_results(all_results: list[CategoryResult]):
         fpath = RESULT_DIR / f"BFCL_v4_{cr.category}_result.json"
         with open(fpath, "w") as f:
             for r in cr.results:
-                f.write(json.dumps({"id": r.get("id", ""), "result": r.get("result", [])}) + "\n")
+                entry = {"id": r.get("id", ""), "result": r.get("result", [])}
+                tokens = r.get("tokens", {})
+                if tokens.get("input_tokens"):
+                    entry["input_token_count"] = tokens["input_tokens"]
+                if tokens.get("output_tokens"):
+                    entry["output_token_count"] = tokens["output_tokens"]
+                if r.get("latency"):
+                    entry["latency"] = r["latency"]
+                f.write(json.dumps(entry) + "\n")
 
     # Summary
     summary = {
