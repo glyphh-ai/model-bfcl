@@ -808,6 +808,19 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         filtered_tools.append(tool)
                         filtered_names.add(tool["name"])
 
+            # Irrelevance check: if query doesn't match available functions, skip LLM
+            # This catches miss_func holdout turns where the needed function is absent
+            if category == "multi_turn_miss_func" and query != "I have updated some more functions you can choose from. What about now?":
+                irr_model = IrrelevanceModel()
+                irr_model.configure(func_defs)
+                if not irr_model.is_relevant(query):
+                    all_turn_decoded.append([])
+                    all_turn_gorilla.append([])
+                    handler.record_turn(query, [])
+                    messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
+                    messages.append({"role": "assistant", "content": [{"type": "text", "text": "I'm sorry, but I don't have a function available that can fulfill this request."}]})
+                    continue
+
             turn_system = system_prompt
 
             messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
