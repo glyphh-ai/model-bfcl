@@ -624,17 +624,7 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
 # ══════════════════════════════════════════════════════════════════════════
 
 # Clean system prompt — general function-calling guidance only, no BFCL-specific gaming
-MULTI_TURN_SYSTEM_PROMPT_RULES = (
-    "You are an expert in composing functions. You are given a question and a set of possible functions. "
-    "Based on the question, you will need to make one or more function/tool calls to achieve the purpose. "
-    "If none of the functions can be used, point it out and do not make any tool calls.\n\n"
-    "RULES:\n"
-    "1. Use EXACT parameter names from the function schema. Do not invent parameter names.\n"
-    "2. When a function returns a result you need for the next call, wait for the result before proceeding.\n"
-    "3. Only call functions that accomplish the task. Do not add unnecessary extra calls.\n"
-    "4. ALWAYS make tool calls when the user asks you to do something. Never respond with just text when a function call is needed.\n"
-    "5. Read the function descriptions carefully to understand how each parameter works."
-)
+MULTI_TURN_SYSTEM_PROMPT_RULES = ""
 
 MAX_STEPS_PER_TURN = 10
 
@@ -731,7 +721,12 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     initial_config = entry.get("initial_config", {})
     involved_classes = entry["involved_classes"]
 
-    func_defs = load_func_defs(involved_classes, entry.get("excluded_function", []))
+    # Exclude both explicitly excluded functions AND held-out (missed) functions
+    excluded = list(entry.get("excluded_function", []))
+    holdout_raw = entry.get("missed_function", {})
+    for turn_funcs in holdout_raw.values():
+        excluded.extend(turn_funcs)
+    func_defs = load_func_defs(involved_classes, excluded)
     scorers = _setup_hdc_scorers(involved_classes)
 
     all_tools = []
@@ -744,6 +739,19 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
 
     system_prompt = _build_mt_system_prompt(initial_config)
 
+    # missed_function: map of turn_idx -> list of function names to add back at that turn
+    holdout_function = entry.get("missed_function", {})
+    # Pre-load held-out function defs (load all funcs, find the ones that were excluded)
+    holdout_func_defs = {}  # name -> func_def (with class prefix)
+    if holdout_function:
+        all_func_defs_full = load_func_defs(involved_classes)  # no exclusions
+        excluded_names = {fd["name"] for fd in func_defs}
+        for fd in all_func_defs_full:
+            if fd["name"] not in excluded_names:
+                # Strip class prefix to get bare name
+                bare = fd["name"].split(".", 1)[-1] if "." in fd["name"] else fd["name"]
+                holdout_func_defs[bare] = fd
+
     queries = []
     for turn_messages in entry.get("question", []):
         for msg in turn_messages:
@@ -755,12 +763,27 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
 
     messages = []
     all_turn_decoded = []
+    all_turn_gorilla = []  # gorilla-format: per-turn list of step results for export
     token_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
     t0 = time.time()
 
     for turn_idx, query in enumerate(queries):
+        # Check if this is a holdout turn — add back held-out functions
+        if str(turn_idx) in holdout_function:
+            for hf_name in holdout_function[str(turn_idx)]:
+                if hf_name in holdout_func_defs:
+                    fd = holdout_func_defs[hf_name]
+                    func_defs.append(fd)
+                    tool = _to_anthropic_tool(fd)
+                    if tool["name"] not in seen_tool_names:
+                        all_tools.append(tool)
+                        seen_tool_names.add(tool["name"])
+            # Send the "updated functions" message instead of skipping
+            query = "I have updated some more functions you can choose from. What about now?"
+
         if not query:
             all_turn_decoded.append([])
+            all_turn_gorilla.append([])
             continue
 
         filtered_defs, top_matches = _hdc_route(query, scorers, func_defs, involved_classes)
@@ -778,6 +801,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
         messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
 
         turn_steps = []
+        turn_gorilla_steps = []
         step = 0
 
         while step < MAX_STEPS_PER_TURN:
@@ -812,11 +836,14 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                 break
 
             call_strings = []
+            gorilla_step = []
             for tu in tool_uses:
                 arg_parts = [f"{k}={repr(v)}" for k, v in tu.input.items()]
                 call_strings.append(f"{tu.name}({', '.join(arg_parts)})")
+                gorilla_step.append({tu.name: json.dumps(tu.input)})
 
             turn_steps.append(call_strings)
+            turn_gorilla_steps.append(gorilla_step)
 
             execution_results, _ = execute_multi_turn_func_call(
                 call_strings, initial_config, involved_classes,
@@ -837,6 +864,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                 break
 
         all_turn_decoded.append(turn_steps)
+        all_turn_gorilla.append(turn_gorilla_steps)
 
     latency = time.time() - t0
 
@@ -853,9 +881,14 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
         model_name=model_name,
     )
 
+    # Pad gorilla result to match ground truth length
+    while len(all_turn_gorilla) < len(ground_truth):
+        all_turn_gorilla.append([])
+
     return {
         "id": scenario_id,
         "passed": check_result["valid"],
+        "result": all_turn_gorilla,
         "tokens": token_usage,
         "latency": latency,
     }
