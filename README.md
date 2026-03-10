@@ -1,35 +1,213 @@
-# BFCL Function Caller
+# Glyphh Ada 1.1 — BFCL V4 Function Caller
 
-Glyphh HDC model for the [Berkeley Function Calling Leaderboard](https://gorilla.cs.berkeley.edu/leaderboard.html) (BFCL V4).
+A hybrid HDC + FC (Function Calling) model for the [Berkeley Function Calling Leaderboard](https://gorilla.cs.berkeley.edu/leaderboard.html) (BFCL V4).
 
-Pure hyperdimensional computing — no LLM, no neural network. Deterministic HDC routing + schema-guided argument extraction.
+Built on the [Glyphh](https://www.glyphh.ai) hyperdimensional computing runtime. Named after Ada Lovelace — the mother of computer programs before they were ever invented.
 
-Built on [**Glyphh Ada 1.1**](https://www.glyphh.ai/products/runtime)
+## What this is (and isn't)
 
-## Results (V4)
+This model uses **hyperdimensional computing (HDC)** for function routing and **Claude Haiku 4.5** for argument extraction. It is not a general-purpose LLM. It is a purpose-built system that combines deterministic vector math with targeted LLM calls to solve the function calling problem.
 
-| Category | Accuracy | Weight |
-|----------|----------|--------|
-| Non-Live | 97.5% | 10% |
-| Hallucination | 99.9% | 10% |
-| Live | 71.8% | 10% |
-| Multi-Turn | 97.0% | 30% |
-| Agentic (Memory) | 91.6% | 40% |
-| **Overall** | **92.7%** | 100% |
+We are transparent about the approach:
+
+- **HDC handles routing** — which function to call. This is deterministic, sub-millisecond, and uses zero LLM tokens at inference time for the routing decision itself.
+- **Claude Haiku handles arguments** — what values to pass. The LLM sees only the matched function schema and the user query. It fills in parameters.
+- **Exemplars are pre-built at build time** — we use Claude to generate natural language variations of each function's intent, encode them into HDC vectors, and search against them at runtime. This is the same paradigm inversion strategy described in the [Pipedream white paper](../pipedream/white-paper.md).
+- **Intent extraction is hand-tuned per domain** — each API class has custom verb/target/keyword maps in `intent.py`. This is not a generic model; it is specifically engineered for the 9 API classes and 128 functions in the BFCL V4 multi-turn benchmark.
+- **Irrelevance detection uses a dedicated HDC model** — a separate encoder (seed=53) with parameter-name alignment as primary signal, no LLM involved.
+- **Memory (agentic) is pure HDC** — prerequisite conversations are encoded as Glyphs and retrieved via cosine similarity. No LLM.
+
+The goal is to demonstrate that HDC can serve as a practical routing layer for function calling, complementing LLMs rather than replacing them. The LLM is used where it excels (creative argument extraction). HDC is used where it excels (fast, deterministic, structured matching).
+
+## Results
+
+### BFCL V4 — Gorilla-verified scores
+
+These scores are produced by the [gorilla eval framework](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard) state execution checker, not internal routing accuracy.
+
+| Section | Weight | Score |
+|---------|--------|-------|
+| Non-Live (AST) | 10% | 88.96% |
+| Live (AST) | 10% | 74.46% |
+| Hallucination | 10% | 87.56% |
+| Multi-Turn | 30% | 42.50% |
+| Agentic (Memory + Web Search) | 40% | 83.05% |
+| **Overall** | **100%** | **71.07%** |
+
+*Scores as of 2026-03-10. Multi-turn eval with system prompt improvements is in progress.*
+
+### Non-Live subcategory breakdown
+
+| Category | Accuracy |
+|----------|----------|
+| Simple (Python) | 94.50% |
+| Java | 76.00% |
+| JavaScript | 72.00% |
+| Multiple | 95.00% |
+| Parallel | 91.50% |
+| Parallel Multiple | 88.50% |
+| Irrelevance | 85.42% |
+
+### Pure HDC routing accuracy (internal, no gorilla state execution)
+
+These are routing-only scores — did HDC pick the right function? This does not measure argument correctness or state execution.
+
+| Category | Accuracy |
+|----------|----------|
+| Non-Live | 97.5% |
+| Hallucination | 99.9% |
+| Live | 71.8% |
+| Multi-Turn | 97.0% |
+| Agentic (Memory) | 91.6% |
+| **Overall** | **92.7%** |
+
+The gap between internal routing accuracy (92.7%) and gorilla-verified scores (71.07%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
 
 ## Architecture
 
+### The paradigm inversion
+
+The core insight is borrowed from our [Pipedream model](../pipedream/): move the LLM's work from runtime to build time.
+
+Traditional function calling asks the LLM to route, select, and extract — all at runtime, under latency pressure, with non-deterministic results. We split the problem:
+
 ```
-User Query → encode_query() → HDC vector
-                                        } cosine similarity → best match
-Function Defs → encode_function() → HDC vectors
+Build time:   LLM generates intent exemplars for each function. Once.
+              Exemplars encoded into HDC vector space. Static index.
+
+Runtime:      Query → intent extraction → HDC cosine search → top match(es)
+              Top match + query → LLM arg extraction → function call
 ```
 
-**Single-turn**: BFCLScorer encodes query + function defs into HDC vectors, picks best match via cosine similarity, then ArgumentExtractor fills parameters from the query using schema-guided extraction.
+The LLM's generative capability is used exactly where it's strongest: creative enumeration of how humans phrase intents (build time) and flexible parameter extraction from natural language (runtime). The structured matching problem — which of 128 functions does this query map to? — is handled by deterministic vector math.
 
-**Multi-turn**: Two-stage routing — `extract_api_class()` detects which API class a turn targets, then per-class BFCLScorer with pre-built exemplars scores via `score_multi()` gap analysis. DomainConfig keywords catch additional multi-function calls.
+### Three-stage pipeline
 
-**Memory (Agentic)**: MemoryHandler encodes prerequisite conversation sentences as Glyphs, then retrieves top matches for each question via cosine similarity. Ground truth naturally appears as substring in retrieved text.
+#### Stage 1: Intent extraction (`intent.py`)
+
+Hand-built per-domain extraction with ~800 lines of verb/target/keyword maps:
+
+- **55+ action verbs** mapped to canonical forms (e.g., "remove", "delete", "erase" → `delete`)
+- **140+ target nouns** across 9 domains (filesystem, social, math, trading, travel, vehicle, messaging, ticket, posting)
+- **Per-class keyword detection** for API class routing in multi-turn scenarios
+- **Pack phrase matching** from Glyphh SDK intent packs for multi-word patterns
+
+This is explicitly hand-tuned for the BFCL function vocabulary. It is not a generic intent extractor. Each API class has patterns that distinguish its functions from others — e.g., "search in file" routes differently than "search for flights."
+
+#### Stage 2: HDC encoding and scoring (`encoder.py`, `scorer.py`)
+
+Two-layer encoder (dimension=10,000, seed=42):
+
+**Layer 1 — Signature (weight 0.55):**
+- `action` role: lexicon-encoded verb (get, create, delete, search, etc.)
+- `target` role: lexicon-encoded noun (file, stock, flight, message, etc.)
+- `function_name` role: bag-of-words on the method name tokens
+
+**Layer 2 — Semantics (weight 0.45):**
+- `description` role: bag-of-words on function description text
+- `parameters` role: bag-of-words on parameter names, types, and enum values
+
+At query time, the same encoder produces a query vector. Cosine similarity against all function vectors produces a ranked list. The top match is the routed function.
+
+#### Stage 3: Argument extraction
+
+- **Python functions**: Claude Haiku via native Anthropic `tool_use` — the LLM sees only the matched function schema and fills parameters naturally.
+- **Java/JavaScript functions**: `LLMArgumentExtractor` with language-specific prompting for type conversion (Java `int` vs Python `int`, etc.).
+
+### Multi-turn architecture
+
+Multi-turn entries require conversation state tracking across 3-5 turns, where each turn may involve multiple function calls.
+
+```
+Turn query → extract_api_class() → class keyword matching
+           → per-class BFCLModelScorer → HDC function ranking
+           → filtered tools → Claude multi-step loop
+           → execute calls → feed results back → next step
+```
+
+Key components:
+- **MultiTurnHandler** (`multi_turn_handler.py`): Orchestrates HDC routing + CognitiveLoop state tracking
+- **CognitiveLoop**: Tracks filesystem CWD, authentication state, prerequisite actions
+- **DomainConfig** (`domain_config.py`): Per-class action→function mapping, multi-function detection keywords, exclusion rules for confusable pairs
+
+The multi-step loop allows Claude to course-correct: it calls a function, sees the execution result, and decides whether to call another function or stop. This is critical for turns that require sequential operations (e.g., `cd` then `grep`).
+
+### Irrelevance detection (`irrelevance_model.py`)
+
+A dedicated HDC model (seed=53, separate from the main routing encoder) that determines whether a query is relevant to any available function. Three layers:
+
+| Layer | Weight | Signal |
+|-------|--------|--------|
+| Parameter alignment | 0.50 | Do the query's nouns match any function parameter names? |
+| Name alignment | 0.35 | Does the query reference words from the function name? |
+| Description alignment | 0.15 | Does the query match function description keywords? |
+
+Threshold: 0.20. If the best function score is below threshold, the query is classified as irrelevant (no function should be called). This is pure HDC — no LLM tokens consumed.
+
+### Memory / agentic (`memory.py`)
+
+Pure HDC retrieval. Prerequisite conversation sentences are encoded as Glyphs using bag-of-words. When a memory question arrives, it's encoded the same way and the top-k most similar sentences are retrieved via cosine similarity. The ground truth answer naturally appears as a substring in the retrieved text.
+
+No LLM involved. 87.1% accuracy on gorilla-verified memory evaluation.
+
+## Build pipeline
+
+### Exemplar generation (`discover.py`)
+
+At build time, we mine the BFCL dataset and generate exemplars for each function:
+
+1. **Mining phase**: Extract real natural language queries from BFCL multi-turn ground truth data. Map each query to the function it invokes. Example: "search for Error in log.txt" → `GorillaFileSystem.grep`
+
+2. **Exemplar generation**: Create 3 weighted BoW (bag-of-words) variants per function:
+   - **Variant 1**: Differentiating words (3x emphasized) + class name — highlights what makes this function unique vs. siblings
+   - **Variant 2**: Name tokens + description + class name — broad semantic coverage
+   - **Variant 3**: Mined query tokens + differentiating words — real human phrasings
+
+3. **Output**: Per-class `exemplars.jsonl` and `tests.jsonl` files in `classes/{folder}/`
+
+This diversity ensures HDC cosine search matches varied query phrasings. The same "send message" intent phrased as "post a note," "write a message," or "ping the channel" should all match the same function.
+
+### Per-class structure
+
+9 API classes, 128 total functions:
+
+| Class | Functions | Domain |
+|-------|-----------|--------|
+| GorillaFileSystem | 17 | Filesystem operations (cd, ls, grep, mv, etc.) |
+| TwitterAPI | 4 | Social media (tweet, retweet, follow, etc.) |
+| MessageAPI | 8 | Messaging (send, receive, delete messages) |
+| PostingAPI | 3 | Content posting |
+| TicketAPI | 5 | Support tickets (create, resolve, close) |
+| MathAPI | 14 | Mathematical operations |
+| TradingBot | 13 | Stock trading (buy, sell, portfolio) |
+| TravelBookingAPI | 28 | Travel (flights, hotels, car rentals) |
+| VehicleControlAPI | 35 | Vehicle systems (engine, lights, HVAC) |
+
+Each class has its own:
+- `exemplars.jsonl` — pre-encoded HDC exemplars
+- `tests.jsonl` — test queries for internal validation
+- Intent patterns in `intent.py`
+- Domain config in `domain_config.py`
+
+## What we learned
+
+### Routing accuracy != execution accuracy
+
+Our pure HDC routing hits 92.7% internally — it picks the right function. But gorilla eval measures end-to-end state correctness after execution. The gap comes from:
+
+- **Argument extraction errors**: HDC picks `grep(file_name=?, pattern=?)` correctly, but the LLM fills `pattern="error"` instead of `pattern="Error"` (case sensitivity).
+- **Multi-step sequencing**: The ground truth expects `cd("docs")` then `grep("report.txt", "budget")`. Our model might grep first (wrong CWD → wrong result).
+- **State accumulation**: One wrong call in turn 1 cascades through turns 2-4.
+
+### The empty turn problem
+
+In multi-turn evaluation, 22% of our failures were "empty turns" — Claude responded with text instead of making tool calls. Adding a system prompt that instructs Claude to always attempt tool calls improved multi-turn base from 52% to 69.5%.
+
+### Hand-tuned intent extraction is a strength and a limitation
+
+The 800-line `intent.py` with per-domain verb/target maps is what makes routing accurate for these specific 128 functions. But it doesn't generalize. A new API class would require new mappings. This is the tradeoff: domain-specific precision vs. generic coverage.
+
+The Pipedream model takes the opposite approach — generic linguistic intent extraction that scales to 10,000+ actions. BFCL takes the targeted approach because the benchmark rewards precision on a fixed function set.
 
 ## Quick start
 
@@ -43,137 +221,39 @@ python run_bfcl.py --download-only
 # Quick test (5 entries per category)
 python run_bfcl.py --max-entries 5
 
-# Full V4 eval (all categories)
+# Full V4 eval — HDC routing only (internal accuracy)
 python run_bfcl.py --all
 
-# Specific categories
-python run_bfcl.py --categories simple multiple multi_turn_base memory_kv
+# Full V4 eval — hybrid HDC+FC (gorilla-format output)
+python run_full_eval.py --sections all
 
-# With verbose output (show mismatches)
-python run_bfcl.py --all --verbose
+# Specific sections
+python run_full_eval.py --sections multi_turn
+python run_full_eval.py --sections hallucination
 
-# Save results to disk
-python run_bfcl.py --all --output results/
+# Run through gorilla eval scorer
+cd <gorilla>/berkeley-function-call-leaderboard
+bfcl evaluate --model glyphh-ada-1.1 --test-category all
 ```
-
-## Categories
-
-| Category | Type | Description |
-|----------|------|-------------|
-| `simple` | Non-Live | Single function, Python |
-| `java` | Non-Live | Single function, Java |
-| `javascript` | Non-Live | Single function, JavaScript |
-| `multiple` | Non-Live | Pick one from multiple candidates |
-| `parallel` | Non-Live | Call multiple functions |
-| `parallel_multiple` | Non-Live | Multiple calls from multiple candidates |
-| `irrelevance` | Hallucination | No function should be called |
-| `live_simple` | Live | Single function, real APIs |
-| `live_multiple` | Live | Pick one, real APIs |
-| `live_parallel` | Live | Multiple calls, real APIs |
-| `live_parallel_multiple` | Live | Multiple from multiple, real APIs |
-| `live_irrelevance` | Hallucination | No call, real APIs |
-| `multi_turn_base` | Multi-Turn | Multi-step conversations |
-| `multi_turn_miss_func` | Multi-Turn | Missing function variant |
-| `multi_turn_miss_param` | Multi-Turn | Missing parameter variant |
-| `multi_turn_long_context` | Multi-Turn | Long context variant |
-| `memory_kv` | Agentic | Memory retrieval (KV backend) |
-| `memory_vector` | Agentic | Memory retrieval (vector backend) |
-| `memory_rec_sum` | Agentic | Memory retrieval (recursive summary) |
-
-## Gorilla leaderboard submission
-
-### Generate result files
-
-```bash
-# Generate gorilla-format JSONL files for all V4 categories
-python run_bfcl.py --all --output-gorilla results/glyphh-hdc-v1
-
-# This produces:
-# results/glyphh-hdc-v1/
-#   non_live/    (7 files: simple_python, java, javascript, multiple, parallel, parallel_multiple, irrelevance)
-#   live/        (5 files: live_simple, live_multiple, live_parallel, live_parallel_multiple, live_irrelevance)
-#   multi_turn/  (4 files: multi_turn_base, miss_func, miss_param, long_context)
-#   agentic/     (3 files: memory_kv, memory_vector, memory_rec_sum)
-```
-
-### Wire into gorilla eval framework
-
-1. **Clone the gorilla repo**:
-   ```bash
-   git clone https://github.com/ShishirPatil/gorilla.git
-   cd gorilla/berkeley-function-call-leaderboard
-   pip install -e .
-   ```
-
-2. **Copy the handler**:
-   ```bash
-   cp gorilla_handler.py \
-      <gorilla>/berkeley-function-call-leaderboard/bfcl_eval/model_handler/api_inference/glyphh.py
-   ```
-
-3. **Copy pre-computed result files**:
-   ```bash
-   cp -r results/glyphh-hdc-v1/ \
-      <gorilla>/berkeley-function-call-leaderboard/result/glyphh-hdc-v1/
-   ```
-
-4. **Register in model_config.py** (`bfcl_eval/constants/model_config.py`):
-   ```python
-   from bfcl_eval.model_handler.api_inference.glyphh import GlyphhHDCHandler
-
-   # Add to api_inference_model_map:
-   "glyphh-hdc-v1": ModelConfig(
-       model_name="glyphh-hdc-v1",
-       display_name="Glyphh HDC v1 (Prompt)",
-       url="https://glyphh.com",
-       org="Glyphh",
-       license="Proprietary",
-       model_handler=GlyphhHDCHandler,
-       input_price=None,
-       output_price=None,
-       is_fc_model=False,
-       underscore_to_dot=False,
-   ),
-   ```
-
-5. **Register in supported_models.py** (`bfcl_eval/constants/supported_models.py`):
-   ```python
-   # Add to SUPPORTED_MODELS list:
-   "glyphh-hdc-v1",
-   ```
-
-6. **Run evaluation**:
-   ```bash
-   bfcl evaluate --model glyphh-hdc-v1 --test-category all
-   bfcl scores
-   ```
-
-### Handler details
-
-`gorilla_handler.py` contains `GlyphhHDCHandler` — a standalone decoder that parses pre-computed result strings into AST and execute formats:
-
-- `decode_ast(result)` — Parses JSON string `'[{"func": {"param": "val"}}]'` into `[{"func": {"param": "val"}}]`
-- `decode_execute(result)` — Converts to executable format `["func(param='val')"]`
-- Empty strings (irrelevance) → `[]`
-- Multi-turn results are nested `list[list[str]]` where each inner list contains a JSON string of function calls for that turn
-
-No inference happens in the handler — all computation is pre-computed by `run_bfcl.py --output-gorilla`.
 
 ## File structure
 
 ```
 bfcl/
-├── run_bfcl.py          # Main eval script + gorilla output generation
-├── handler.py           # BFCLHandler — HDC routing + arg extraction
-├── scorer.py            # BFCLScorer — HDC function scoring
-├── encoder.py           # Encoder config for BFCL function defs
-├── extractor.py         # ArgumentExtractor — schema-guided arg extraction
-├── intent.py            # extract_api_class() for multi-turn routing
-├── domain_config.py     # Per-class domain configs (multi-action keywords)
-├── memory.py            # MemoryHandler — HDC memory retrieval for agentic
-├── discover.py          # Exemplar + test query generation
-├── gorilla_handler.py   # GlyphhHDCHandler — gorilla eval framework decoder
-├── classes/             # Per-class exemplars and tests
+├── run_full_eval.py        # Full V4 eval — HDC routing + LLM arg extraction
+├── run_bfcl.py             # Internal HDC-only eval
+├── encoder.py              # ENCODER_CONFIG (two-layer, 10000 dims, seed=42)
+├── scorer.py               # BFCLModelScorer + LayerWeightedStrategy
+├── intent.py               # Per-domain action/target/keyword extraction
+├── domain_config.py        # Per-class DomainConfig registry
+├── irrelevance_model.py    # Dedicated HDC irrelevance detector (seed=53)
+├── sidecar.py              # IrrelevanceSidecar (seed=97, validates matches)
+├── multi_turn_handler.py   # MultiTurnHandler + CognitiveLoop
+├── llm_extractor.py        # LLMArgumentExtractor (Claude Haiku)
+├── memory.py               # MemoryHandler — pure HDC memory retrieval
+├── discover.py             # Build-time exemplar + test generation
+├── gorilla_handler.py      # GlyphhHDCHandler — gorilla eval framework decoder
+├── classes/                # Per-class exemplars, tests, and function defs
 │   ├── gorilla_file_system/
 │   ├── twitter_api/
 │   ├── message_api/
@@ -183,9 +263,17 @@ bfcl/
 │   ├── trading_bot/
 │   ├── travel_booking/
 │   └── vehicle_control/
-├── data/bfcl/           # Downloaded BFCL test data (gitignored)
-└── results/             # Generated results (gitignored)
+├── data/bfcl/              # Downloaded BFCL test data (gitignored)
+├── results/                # Generated results (gitignored)
+├── archive/                # Pre-Ada archived implementation
+└── scrutiny/               # Independent review and analysis
 ```
+
+## Dependencies
+
+- **Glyphh Runtime** (`glyphh-runtime/`): Core HDC engine — Encoder, Glyph, Vector, GQL, CognitiveLoop
+- **Anthropic API**: Claude Haiku 4.5 for argument extraction (multi-turn and single-turn)
+- **Python 3.13+**
 
 ## License
 
