@@ -417,7 +417,7 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
         top_score = result.all_scores[0]["score"] if result.all_scores else 0.0
         is_irrelevant = top_score < scorer.IRRELEVANCE_THRESHOLD
         latency = time.time() - t0
-        tool_calls = [] if is_irrelevant else [{result.all_scores[0]["function"]: "{}"}]
+        tool_calls = [] if is_irrelevant else [{result.all_scores[0]["function"]: {}}]
         return {"id": entry_id, "correct": is_irrelevant, "latency": latency,
                 "tokens": token_usage, "result": json.dumps(tool_calls)}
 
@@ -470,13 +470,13 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
 
     latency = time.time() - t0
 
-    # Extract tool calls from response
+    # Extract tool calls from response — {func_name: {arg: value}} dicts
     tool_calls = []
     for block in response.content:
         if block.type == "tool_use":
-            tool_calls.append({block.name: json.dumps(block.input)})
+            tool_calls.append({block.name: block.input})
 
-    # Build gorilla result format
+    # Build gorilla result format: JSON string of [{func: {args}}, ...]
     gorilla_result = json.dumps(tool_calls) if tool_calls else ""
 
     # Correctness check using gorilla's ast_checker
@@ -494,15 +494,9 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
             else:
                 lang = Language.PYTHON
 
-            # Convert tool_calls to the format ast_checker expects
-            model_output = []
-            for tc in tool_calls:
-                for fn, args_json in tc.items():
-                    model_output.append({fn: json.loads(args_json)})
-
             check = ast_checker(
                 func_description=func_defs,
-                model_output=model_output,
+                model_output=tool_calls,
                 possible_answer=possible_answer,
                 language=lang,
                 test_category=category,
@@ -522,7 +516,8 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
     }
 
 
-def run_routing_categories(categories: list[str], hybrid: bool = True) -> list[CategoryResult]:
+def run_routing_categories(categories: list[str], hybrid: bool = True,
+                           workers: int = 5) -> list[CategoryResult]:
     """Run non-live, live, and hallucination categories.
 
     Architecture: HDC routes (which function) + LLM extracts (arg values).
@@ -536,12 +531,9 @@ def run_routing_categories(categories: list[str], hybrid: bool = True) -> list[C
         extractor = LLMArgumentExtractor(model=MODEL)
 
     for cat in categories:
-        print(f"\n── {cat} ──")
+        print(f"\n── {cat} (workers={workers}) ──")
         cr = CategoryResult(cat)
         t0 = time.time()
-
-        if extractor:
-            extractor.snapshot()
 
         filepath = DATA_DIR / BFCL_FILES.get(cat, "")
         if not filepath.exists():
@@ -559,27 +551,33 @@ def run_routing_categories(categories: list[str], hybrid: bool = True) -> list[C
                 for ae in load_jsonl(gt_path):
                     gt_by_id[ae.get("id", "")] = ae
 
-        for i, entry in enumerate(entries):
-            entry_id = entry.get("id", f"{cat}_{i}")
-            gt_entry = gt_by_id.get(entry_id)
-            r = _run_routing_entry(entry, gt_entry, cat, extractor)
+        done_count = 0
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_run_routing_entry, entry,
+                                gt_by_id.get(entry.get("id", f"{cat}_{i}")),
+                                cat, extractor): i
+                for i, entry in enumerate(entries)
+            }
+            for future in as_completed(futures):
+                r = future.result()
+                cr.total += 1
+                if r["correct"]:
+                    cr.correct += 1
+                cr.latencies.append(r["latency"])
+                cr.results.append(r)
 
-            cr.total += 1
-            if r["correct"]:
-                cr.correct += 1
-            cr.latencies.append(r["latency"])
-            cr.results.append(r)
+                # Aggregate token usage from per-entry results
+                tokens = r.get("tokens", {})
+                cr.input_tokens += tokens.get("input_tokens", 0)
+                cr.output_tokens += tokens.get("output_tokens", 0)
+                cr.api_calls += tokens.get("api_calls", 0)
 
-            if (i + 1) % 50 == 0 or i + 1 == len(entries):
-                elapsed = time.time() - t0
-                safe_print(f"  {cat}: {i+1}/{len(entries)} done, {cr.correct} correct, {elapsed:.0f}s")
-
-        # Token usage from extractor
-        if extractor:
-            tu = extractor.get_category_usage()
-            cr.input_tokens = tu.get("input_tokens", 0)
-            cr.output_tokens = tu.get("output_tokens", 0)
-            cr.api_calls = tu.get("calls", 0)
+                done_count += 1
+                if done_count % 50 == 0 or done_count == len(entries):
+                    elapsed = time.time() - t0
+                    safe_print(f"  {cat}: {done_count}/{len(entries)} done, "
+                               f"{cr.correct} correct, {elapsed:.0f}s")
 
         elapsed = time.time() - t0
         print(f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s")
@@ -1364,6 +1362,8 @@ def main():
     parser.add_argument("--skip", nargs="+", default=[],
                        choices=list(SECTION_MAP.keys()),
                        help="Sections to skip")
+    parser.add_argument("--workers", type=int, default=5,
+                       help="Routing (non-live/live/hallucination) parallel workers (default 5)")
     parser.add_argument("--mt-workers", type=int, default=3,
                        help="Multi-turn parallel workers (default 3)")
     parser.add_argument("--ws-workers", type=int, default=5,
@@ -1377,6 +1377,7 @@ def main():
     print(f"BFCL V4 Full Evaluation")
     print(f"Model: {MODEL}")
     print(f"Sections: {sections}")
+    print(f"Routing workers: {args.workers}")
     print(f"Multi-turn workers: {args.mt_workers}")
     print(f"Web search workers: {args.ws_workers}")
 
@@ -1389,7 +1390,8 @@ def main():
         routing_cats = []
         for s in routing_sections:
             routing_cats.extend(SECTION_MAP[s])
-        results = run_routing_categories(routing_cats, hybrid=not args.no_hybrid)
+        results = run_routing_categories(routing_cats, hybrid=not args.no_hybrid,
+                                         workers=args.workers)
         all_results.extend(results)
 
     # 2. Multi-Turn (LLM execution loop)
