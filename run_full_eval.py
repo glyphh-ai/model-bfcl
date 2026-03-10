@@ -427,21 +427,17 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
         return {"id": entry_id, "correct": False, "latency": latency,
                 "tokens": token_usage, "result": ""}
 
-    # For parallel categories: take more candidates; for simple/multiple: top few
+    # For parallel categories: pass all available functions — the query asks for
+    # multiple operations and HDC naturally scores one higher, but both are needed.
+    # For simple/multiple: HDC narrows to top-3 candidates.
     if is_parallel:
-        # Include all functions above a relative threshold (top score - 0.15)
-        top_score = result.all_scores[0]["score"]
-        matched_names = {s["function"] for s in result.all_scores
-                         if s["score"] >= top_score - 0.15 and s["score"] > 0.05}
+        matched_func_defs = func_defs
     else:
-        # Simple/multiple: take top-3 candidates for LLM to pick from
         matched_names = {s["function"] for s in result.all_scores[:3]
                          if s["score"] > 0.05}
-
-    # Filter func_defs to HDC-selected functions
-    matched_func_defs = [fd for fd in func_defs if fd["name"] in matched_names]
-    if not matched_func_defs:
-        matched_func_defs = func_defs[:3]  # fallback
+        matched_func_defs = [fd for fd in func_defs if fd["name"] in matched_names]
+        if not matched_func_defs:
+            matched_func_defs = func_defs[:3]  # fallback
 
     # ── LLM arg extraction ──
     # Detect language for Java/JS-specific prompting
