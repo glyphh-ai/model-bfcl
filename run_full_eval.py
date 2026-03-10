@@ -625,7 +625,13 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
 # ══════════════════════════════════════════════════════════════════════════
 
 # Clean system prompt — general function-calling guidance only, no BFCL-specific gaming
-MULTI_TURN_SYSTEM_PROMPT_RULES = ""
+MULTI_TURN_SYSTEM_PROMPT_RULES = (
+    "You are a helpful assistant with access to tools. "
+    "Always use the provided tools to fulfill user requests. "
+    "Make function calls rather than describing what you would do. "
+    "If the user asks you to perform an action, call the appropriate tool immediately. "
+    "You may call multiple tools in sequence within a single turn if needed."
+)
 
 MAX_STEPS_PER_TURN = 10
 
@@ -807,19 +813,6 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     if tool["name"] not in filtered_names:
                         filtered_tools.append(tool)
                         filtered_names.add(tool["name"])
-
-            # Irrelevance check: if query doesn't match available functions, skip LLM
-            # This catches miss_func holdout turns where the needed function is absent
-            if category == "multi_turn_miss_func" and query != "I have updated some more functions you can choose from. What about now?":
-                irr_model = IrrelevanceModel()
-                irr_model.configure(func_defs)
-                if not irr_model.is_relevant(query):
-                    all_turn_decoded.append([])
-                    all_turn_gorilla.append([])
-                    handler.record_turn(query, [])
-                    messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
-                    messages.append({"role": "assistant", "content": [{"type": "text", "text": "I'm sorry, but I don't have a function available that can fulfill this request."}]})
-                    continue
 
             turn_system = system_prompt
 
