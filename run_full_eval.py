@@ -417,9 +417,9 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
         top_score = result.all_scores[0]["score"] if result.all_scores else 0.0
         is_irrelevant = top_score < scorer.IRRELEVANCE_THRESHOLD
         latency = time.time() - t0
-        tool_calls = [] if is_irrelevant else [{result.all_scores[0]["function"]: {}}]
+        gorilla_calls = [] if is_irrelevant else [{result.all_scores[0]["function"]: "{}"}]
         return {"id": entry_id, "correct": is_irrelevant, "latency": latency,
-                "tokens": token_usage, "result": json.dumps(tool_calls)}
+                "tokens": token_usage, "result": gorilla_calls}
 
     # Get HDC-ranked functions — top candidates above minimum threshold
     if not result.all_scores:
@@ -477,14 +477,17 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
     latency = time.time() - t0
 
     # Extract tool calls from response — restore original dotted names
+    # tool_calls: dicts for inline checker; gorilla_calls: JSON-string args for gorilla export
     tool_calls = []
+    gorilla_calls = []
     for block in response.content:
         if block.type == "tool_use":
             orig_name = tool_name_map.get(block.name, block.name)
             tool_calls.append({orig_name: block.input})
+            gorilla_calls.append({orig_name: json.dumps(block.input)})
 
-    # Build gorilla result format: JSON string of [{func: {args}}, ...]
-    gorilla_result = json.dumps(tool_calls) if tool_calls else ""
+    # gorilla_calls is the export format: [{func: "{\"arg\": \"val\"}"}, ...]
+    # Stored as a list (not JSON string) — gorilla's decode_ast iterates over it directly
 
     # Correctness check using gorilla's ast_checker
     correct = False
@@ -517,8 +520,7 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
         "id": entry_id,
         "correct": correct,
         "latency": latency,
-        "gorilla_result": gorilla_result,
-        "result": gorilla_result,
+        "result": gorilla_calls,
         "tokens": token_usage,
     }
 
