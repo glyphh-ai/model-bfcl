@@ -59,6 +59,7 @@ from bfcl_eval.model_handler.utils import convert_to_function_call as gorilla_co
 
 # Local imports
 from scorer import BFCLModelScorer, _CLASS_DIR_MAP
+from sidecar import IrrelevanceSidecar
 from memory import MemoryHandler
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -412,10 +413,13 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
     scorer.configure_generic(func_defs)
     result = scorer.score(query)
 
-    # For irrelevance: if top score is below threshold, it's irrelevant
+    # For irrelevance: use sidecar to validate the main encoder match
     if is_irrelevance:
         top_score = result.all_scores[0]["score"] if result.all_scores else 0.0
-        is_irrelevant = top_score < scorer.IRRELEVANCE_THRESHOLD
+        sidecar = IrrelevanceSidecar()
+        sidecar.configure(func_defs)
+        is_relevant = sidecar.is_relevant(query, top_score)
+        is_irrelevant = not is_relevant
         latency = time.time() - t0
         gorilla_calls = [] if is_irrelevant else [{result.all_scores[0]["function"]: "{}"}]
         return {"id": entry_id, "correct": is_irrelevant, "latency": latency,
@@ -1336,7 +1340,15 @@ def export_gorilla_results(all_results: list[CategoryResult]):
         fpath = group_dir / f"BFCL_v4_{gorilla_cat}_result.json"
         with open(fpath, "w") as f:
             for r in cr.results:
-                f.write(json.dumps({"id": r.get("id", ""), "result": r.get("result", [])}) + "\n")
+                rid = r.get("id", "")
+                # Gorilla expects category-prefixed IDs:
+                #   memory_0-... → memory_kv_0-...
+                #   web_search_4 → web_search_base_4
+                if gorilla_cat.startswith("memory_") and gorilla_cat != "memory" and not rid.startswith(gorilla_cat):
+                    rid = rid.replace("memory_", gorilla_cat + "_", 1)
+                elif gorilla_cat.startswith("web_search_") and not rid.startswith(gorilla_cat):
+                    rid = rid.replace("web_search_", gorilla_cat + "_", 1)
+                f.write(json.dumps({"id": rid, "result": r.get("result", [])}) + "\n")
         print(f"  Exported: {fpath.relative_to(GORILLA_ROOT)}")
 
     print(f"\nGorilla results exported to {gorilla_result_dir}/")
