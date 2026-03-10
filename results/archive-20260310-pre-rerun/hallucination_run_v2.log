@@ -1,0 +1,81 @@
+BFCL V4 Full Evaluation
+Model: claude-haiku-4-5-20251001
+Sections: ['hallucination']
+Routing workers: 5
+Multi-turn workers: 3
+Web search workers: 5
+
+── irrelevance (workers=5) ──
+  irrelevance: 50/240 done, 34 correct, 57s
+  irrelevance: 100/240 done, 69 correct, 114s
+  irrelevance: 150/240 done, 93 correct, 169s
+  irrelevance: 200/240 done, 122 correct, 224s
+  irrelevance: 240/240 done, 151 correct, 265s
+  irrelevance: 151/240 (62.9%) in 265s
+
+── live_irrelevance (workers=5) ──
+  live_irrelevance: 50/884 done, 46 correct, 67s
+  live_irrelevance: 100/884 done, 96 correct, 130s
+  live_irrelevance: 150/884 done, 123 correct, 207s
+  live_irrelevance: 200/884 done, 163 correct, 273s
+  live_irrelevance: 250/884 done, 196 correct, 344s
+  live_irrelevance: 300/884 done, 219 correct, 430s
+  live_irrelevance: 350/884 done, 253 correct, 504s
+  live_irrelevance: 400/884 done, 297 correct, 573s
+  live_irrelevance: 450/884 done, 331 correct, 670s
+  live_irrelevance: 500/884 done, 355 correct, 753s
+  live_irrelevance: 550/884 done, 378 correct, 819s
+  live_irrelevance: 600/884 done, 409 correct, 896s
+  live_irrelevance: 650/884 done, 421 correct, 993s
+  live_irrelevance: 700/884 done, 433 correct, 1084s
+  live_irrelevance: 750/884 done, 448 correct, 1164s
+  live_irrelevance: 800/884 done, 464 correct, 1251s
+  live_irrelevance: 850/884 done, 494 correct, 1319s
+  live_irrelevance: 884/884 done, 510 correct, 1368s
+  live_irrelevance: 510/884 (57.7%) in 1368s
+
+
+Total evaluation time: 1634s (27.2m)
+
+====================================================================================================
+  GLYPHH — BFCL V4 FULL EVALUATION REPORT
+  Model: claude-haiku-4-5-20251001
+====================================================================================================
+
+  Category                            Acc  Correct  Total      InTok     OutTok  Calls    Cost$  Lat Mean   Lat SD  Lat P95
+  -------------------------------------------------------------------------------------------------------------------------
+
+  HALLUCINATION (10%)
+  │ irrelevance                    62.9%      151    240          0          0      0  0.0000     5.51s    0.38s    6.09s
+  │ live_irrelevance               57.7%      510    884          0          0      0  0.0000     7.73s    4.48s   12.20s
+
+  ===============================================================================================
+  V4 COMPOSITE SCORES:
+    Non-Live                     N/A (10%)
+    Hallucination              60.3% (10%)
+    Live                         N/A (10%)
+    Multi-Turn                   N/A (30%)
+      Memory Summary             N/A
+      Web Search Summary         N/A
+    Agentic                      N/A (40%)
+
+    OVERALL.................   60.3%  (10% of V4 weight)
+
+  TOTAL TOKEN USAGE:
+    Input tokens:             0
+    Output tokens:            0
+    Total tokens:             0
+    API calls:                0
+    Total cost:    $     0.0000
+
+  OVERALL LATENCY:
+    Mean:      7.26s
+    SD:        4.08s
+    P95:      11.70s
+  ===============================================================================================
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_irrelevance_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/

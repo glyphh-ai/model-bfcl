@@ -1,0 +1,475 @@
+BFCL V4 Full Evaluation
+Model: claude-haiku-4-5-20251001
+Sections: ['memory', 'web_search']
+Routing workers: 5
+Multi-turn workers: 3
+Web search workers: 5
+
+── memory_kv ──
+  memory_kv: 135/155 (87.1%) in 2.5s
+
+── memory_vector ──
+  memory_vector: 135/155 (87.1%) in 2.0s
+
+── memory_rec_sum ──
+  memory_rec_sum: 135/155 (87.1%) in 1.9s
+
+── web_search_base (workers=5) ──
+  [4] web_search_4: PASS  (expected: ['Candlewood', 'Candlewood Lake'])
+  -- 1/100 done, 1 passed, 13s
+  [1] web_search_1: PASS  (expected: ['7', 'seven'])
+  -- 2/100 done, 2 passed, 16s
+  [2] web_search_2: PASS  (expected: ['Dong-Sup Yoon', 'Yoo Dong-Sup', 'Yoon Dong-Sup'])
+  -- 3/100 done, 3 passed, 19s
+  [3] web_search_3: PASS  (expected: ['1871'])
+  -- 4/100 done, 4 passed, 22s
+  [6] web_search_6: PASS  (expected: ['697'])
+  -- 5/100 done, 5 passed, 31s
+  [7] web_search_7: PASS  (expected: ['1897'])
+  -- 6/100 done, 6 passed, 34s
+  [8] web_search_8: PASS  (expected: ['Black Tickets'])
+  -- 7/100 done, 7 passed, 38s
+  [5] web_search_5: FAIL  (expected: ['70'])
+  -- 8/100 done, 7 passed, 43s
+  [9] web_search_9: PASS  (expected: ['Srikant Madhav Datar', 'Srikant M. Datar', 'Srikant Datar'])
+  -- 9/100 done, 8 passed, 45s
+  [13] web_search_13: FAIL  (expected: ['2012'])
+  -- 10/100 done, 8 passed, 57s
+  [0] web_search_0: FAIL  (expected: ['Zhang Yiming'])
+  -- 11/100 done, 8 passed, 57s
+  [14] web_search_14: PASS  (expected: ['1947'])
+  -- 12/100 done, 9 passed, 64s
+  [12] web_search_12: FAIL  (expected: ['University of North Carolina at Chapel Hill', 'UNC-Chapel Hill'])
+  -- 13/100 done, 9 passed, 70s
+  [16] web_search_16: PASS  (expected: ['2024-10-25'])
+  -- 14/100 done, 10 passed, 72s
+  [10] web_search_10: FAIL  (expected: ['27'])
+  -- 15/100 done, 10 passed, 75s
+  [15] web_search_15: PASS  (expected: ['Amazon Rainforest', 'Amazon'])
+  -- 16/100 done, 11 passed, 77s
+  [11] web_search_11: FAIL  (expected: ['51'])
+  -- 17/100 done, 11 passed, 79s
+  [17] web_search_17: PASS  (expected: ['Samuel', 'Sam'])
+  -- 18/100 done, 12 passed, 91s
+  [21] web_search_21: PASS  (expected: ['Warren Buffett', 'Warren Edward Buffett'])
+  -- 19/100 done, 13 passed, 102s
+  [22] web_search_22: FAIL  (expected: ['2006'])
+  -- 20/100 done, 13 passed, 106s
+  [19] web_search_19: PASS  (expected: ['2023-02-12'])
+  -- 21/100 done, 14 passed, 111s
+  [20] web_search_20: FAIL  (expected: ['3'])
+  -- 22/100 done, 14 passed, 114s
+  [24] web_search_24: PASS  (expected: ['1992'])
+  -- 23/100 done, 15 passed, 117s
+  [25] web_search_25: PASS  (expected: ['03/29/2024'])
+  -- 24/100 done, 16 passed, 119s
+  [23] web_search_23: PASS  (expected: ['Czechoslovakia', 'Czechoslovak', 'ČSSR'])
+  -- 25/100 done, 17 passed, 133s
+  [29] web_search_29: PASS  (expected: ['Olivier Faure'])
+  -- 26/100 done, 18 passed, 154s
+  [26] web_search_26: PASS  (expected: ["Finneas O'Connell", 'Finneas', "Finneas Baird O'Connell"])
+  -- 27/100 done, 19 passed, 163s
+  [30] web_search_30: PASS  (expected: ['Belgium'])
+  -- 28/100 done, 20 passed, 164s
+  [27] web_search_27: FAIL  (expected: ['2025-01-31'])
+  -- 29/100 done, 20 passed, 165s
+  [18] web_search_18: FAIL  (expected: ['Milo the Lynx', 'Milo'])
+  -- 30/100 done, 20 passed, 165s
+  [28] web_search_28: PASS  (expected: ['Charlie Campbell'])
+  -- 31/100 done, 21 passed, 179s
+  [32] web_search_32: PASS  (expected: ['Yuriko Koike', 'Koike Yuriko'])
+  -- 32/100 done, 22 passed, 180s
+  [34] web_search_34: PASS  (expected: ['Hawaii'])
+  -- 33/100 done, 23 passed, 181s
+  [33] web_search_33: PASS  (expected: ['Alice Walton', 'Alice Louise Walton'])
+  -- 34/100 done, 24 passed, 187s
+  [35] web_search_35: PASS  (expected: ['one', '1'])
+  -- 35/100 done, 25 passed, 193s
+  [36] web_search_36: PASS  (expected: ['Georgetown University', 'GU'])
+  -- 36/100 done, 26 passed, 193s
+  [37] web_search_37: FAIL  (expected: ['2003'])
+  -- 37/100 done, 26 passed, 194s
+  [38] web_search_38: FAIL  (expected: ['TOSS'])
+  -- 38/100 done, 26 passed, 198s
+  [31] web_search_31: PASS  (expected: ['Valdemar Costa Neto'])
+  -- 39/100 done, 27 passed, 199s
+  [40] web_search_40: PASS  (expected: ['KU Leuven', 'Katholieke Universiteit Leuven'])
+  -- 40/100 done, 28 passed, 204s
+  [43] web_search_43: PASS  (expected: ['2024-10-18'])
+  -- 41/100 done, 29 passed, 213s
+  [41] web_search_41: PASS  (expected: ['1957'])
+  -- 42/100 done, 30 passed, 215s
+  [42] web_search_42: PASS  (expected: ['Jayson Tatum', 'Jayson Christopher Tatum'])
+  -- 43/100 done, 31 passed, 216s
+  [39] web_search_39: FAIL  (expected: ['1992'])
+  -- 44/100 done, 31 passed, 222s
+  [45] web_search_45: PASS  (expected: ['Aisen Nikolayev', 'Aysen Nikolayev', 'Aysen Sergeyevich Nikolayev'])
+  -- 45/100 done, 32 passed, 224s
+  [44] web_search_44: PASS  (expected: ['Ginny Sutcliffe'])
+  -- 46/100 done, 33 passed, 226s
+  [47] web_search_47: PASS  (expected: ['El Bulli'])
+  -- 47/100 done, 34 passed, 230s
+  [46] web_search_46: PASS  (expected: ['Christian Democratic Union', 'CDU'])
+  -- 48/100 done, 35 passed, 234s
+  [50] web_search_50: PASS  (expected: ['Slovenia'])
+  -- 49/100 done, 36 passed, 236s
+  [49] web_search_49: PASS  (expected: ['Atlantic Records'])
+  -- 50/100 done, 37 passed, 239s
+  [51] web_search_51: PASS  (expected: ['$222 million', '222 million', '222'])
+  -- 51/100 done, 38 passed, 243s
+  [48] web_search_48: PASS  (expected: ['Daniel Bumba'])
+  -- 52/100 done, 39 passed, 243s
+  [53] web_search_53: PASS  (expected: ['75', '76'])
+  -- 53/100 done, 40 passed, 245s
+  [56] web_search_56: PASS  (expected: ['406200'])
+  -- 54/100 done, 41 passed, 258s
+  [55] web_search_55: PASS  (expected: ['Joseph Polisena Jr.', 'Joseph M. Polisena, Jr.'])
+  -- 55/100 done, 42 passed, 262s
+  [57] web_search_57: FAIL  (expected: ['1-8'])
+  -- 56/100 done, 42 passed, 264s
+  [52] web_search_52: PASS  (expected: ['Michael Portier'])
+  -- 57/100 done, 43 passed, 265s
+  [59] web_search_59: PASS  (expected: ['1960/03/04'])
+  -- 58/100 done, 44 passed, 273s
+  [54] web_search_54: FAIL  (expected: ['Stuart McPherson'])
+  -- 59/100 done, 44 passed, 284s
+  [61] web_search_61: PASS  (expected: ['7'])
+  -- 60/100 done, 45 passed, 285s
+  [58] web_search_58: PASS  (expected: ['Shawanda Evans'])
+  -- 61/100 done, 46 passed, 286s
+  [62] web_search_62: PASS  (expected: ['Order of St. Andrew', 'Order of Saint Andrew'])
+  -- 62/100 done, 47 passed, 296s
+  [63] web_search_63: PASS  (expected: ['3'])
+  -- 63/100 done, 48 passed, 302s
+  [64] web_search_64: PASS  (expected: ['185'])
+  -- 64/100 done, 49 passed, 306s
+  [60] web_search_60: PASS  (expected: ['Sarah Creasey'])
+  -- 65/100 done, 50 passed, 306s
+  [65] web_search_65: FAIL  (expected: ['Andy Flower'])
+  -- 66/100 done, 50 passed, 306s
+  [66] web_search_66: PASS  (expected: ['Saadiya Ahmed', 'Saadiya'])
+  -- 67/100 done, 51 passed, 313s
+  [67] web_search_67: FAIL  (expected: ['Edward Owens'])
+  -- 68/100 done, 51 passed, 327s
+  [71] web_search_71: FAIL  (expected: ['116,175', '116175'])
+  -- 69/100 done, 51 passed, 327s
+  [70] web_search_70: FAIL  (expected: ['Madrid'])
+  -- 70/100 done, 51 passed, 340s
+  [68] web_search_68: PASS  (expected: ['03/01'])
+  -- 71/100 done, 52 passed, 341s
+  [73] web_search_73: PASS  (expected: ['Medjugorje'])
+  -- 72/100 done, 53 passed, 347s
+  [69] web_search_69: PASS  (expected: ['Predrag Puharić', 'Predrag'])
+  -- 73/100 done, 54 passed, 356s
+  [72] web_search_72: FAIL  (expected: ['Ashiya, Hyōgo', 'Ashiya'])
+  -- 74/100 done, 54 passed, 356s
+  [74] web_search_74: FAIL  (expected: ['6828925'])
+  -- 75/100 done, 54 passed, 356s
+  [75] web_search_75: FAIL  (expected: ['Saadiya'])
+  -- 76/100 done, 54 passed, 369s
+  [78] web_search_78: PASS  (expected: ['Ricardo Gallardo Cardona'])
+  -- 77/100 done, 55 passed, 374s
+  [80] web_search_80: PASS  (expected: ['1996-10-16'])
+  -- 78/100 done, 56 passed, 379s
+  [76] web_search_76: PASS  (expected: ['Teshome Quankusie'])
+  -- 79/100 done, 57 passed, 384s
+  [79] web_search_79: PASS  (expected: ['0', 'zero'])
+  -- 80/100 done, 58 passed, 386s
+  [82] web_search_82: PASS  (expected: ['Sheikh'])
+  -- 81/100 done, 59 passed, 398s
+  [81] web_search_81: PASS  (expected: ['Paris'])
+  -- 82/100 done, 60 passed, 400s
+  [84] web_search_84: FAIL  (expected: ['Gong Zheng'])
+  -- 83/100 done, 60 passed, 401s
+  [83] web_search_83: PASS  (expected: ['3', 'three'])
+  -- 84/100 done, 61 passed, 404s
+  [77] web_search_77: PASS  (expected: ['Almin Karamehmedovic', 'Wendy A. McMahon', 'Wendy McMahon'])
+  -- 85/100 done, 62 passed, 413s
+  [85] web_search_85: PASS  (expected: ['Mid laner'])
+  -- 86/100 done, 63 passed, 422s
+  [86] web_search_86: PASS  (expected: ['1.82', '182', '6 ft 0 in'])
+  -- 87/100 done, 64 passed, 423s
+  [89] web_search_89: PASS  (expected: ['Jari Latvala'])
+  -- 88/100 done, 65 passed, 430s
+  [88] web_search_88: PASS  (expected: ['Tracy Dixon'])
+  -- 89/100 done, 66 passed, 433s
+  [91] web_search_91: PASS  (expected: ['1991/09/09'])
+  -- 90/100 done, 67 passed, 436s
+  [90] web_search_90: FAIL  (expected: ['Robert Avery'])
+  -- 91/100 done, 67 passed, 444s
+  [93] web_search_93: PASS  (expected: ['Todd Gloria', 'Todd Rex Gloria'])
+  -- 92/100 done, 68 passed, 445s
+  [92] web_search_92: FAIL  (expected: ['1960-08-22'])
+  -- 93/100 done, 68 passed, 449s
+  [97] web_search_97: PASS  (expected: ['Salem'])
+  -- 94/100 done, 69 passed, 456s
+  [95] web_search_95: PASS  (expected: ['Elke Büdenbender', 'Elke Budenbender'])
+  -- 95/100 done, 70 passed, 466s
+  [96] web_search_96: PASS  (expected: ['Chris Brownridge'])
+  -- 96/100 done, 71 passed, 473s
+  [87] web_search_87: FAIL  (expected: ['Aston Villa'])
+  -- 97/100 done, 71 passed, 473s
+  [94] web_search_94: PASS  (expected: ['Yoshiko Nakamura', 'Yoshiko Ishiba'])
+  -- 98/100 done, 72 passed, 482s
+  [98] web_search_98: PASS  (expected: ['49'])
+  -- 99/100 done, 73 passed, 483s
+  [99] web_search_99: PASS  (expected: ['2', 'two'])
+  -- 100/100 done, 74 passed, 489s
+  web_search_base: 74/100 (74.0%) in 489s
+
+── web_search_no_snippet (workers=5) ──
+  [4] web_search_4: PASS  (expected: ['Candlewood', 'Candlewood Lake'])
+  -- 1/100 done, 1 passed, 11s
+  [1] web_search_1: PASS  (expected: ['7', 'seven'])
+  -- 2/100 done, 2 passed, 16s
+  [2] web_search_2: PASS  (expected: ['Dong-Sup Yoon', 'Yoo Dong-Sup', 'Yoon Dong-Sup'])
+  -- 3/100 done, 3 passed, 18s
+  [3] web_search_3: PASS  (expected: ['1871'])
+  -- 4/100 done, 4 passed, 20s
+  [5] web_search_5: PASS  (expected: ['70'])
+  -- 5/100 done, 5 passed, 20s
+  [8] web_search_8: PASS  (expected: ['Black Tickets'])
+  -- 6/100 done, 6 passed, 34s
+  [7] web_search_7: PASS  (expected: ['1897'])
+  -- 7/100 done, 7 passed, 36s
+  [9] web_search_9: PASS  (expected: ['Srikant Madhav Datar', 'Srikant M. Datar', 'Srikant Datar'])
+  -- 8/100 done, 8 passed, 41s
+  [12] web_search_12: PASS  (expected: ['University of North Carolina at Chapel Hill', 'UNC-Chapel Hill'])
+  -- 9/100 done, 9 passed, 56s
+  [0] web_search_0: FAIL  (expected: ['Zhang Yiming'])
+  -- 10/100 done, 9 passed, 60s
+  [14] web_search_14: PASS  (expected: ['1947'])
+  -- 11/100 done, 10 passed, 65s
+  [13] web_search_13: PASS  (expected: ['2012'])
+  -- 12/100 done, 11 passed, 67s
+  [16] web_search_16: PASS  (expected: ['2024-10-25'])
+  -- 13/100 done, 12 passed, 73s
+  [6] web_search_6: PASS  (expected: ['697'])
+  -- 14/100 done, 13 passed, 76s
+  [11] web_search_11: FAIL  (expected: ['51'])
+  -- 15/100 done, 13 passed, 80s
+  [15] web_search_15: PASS  (expected: ['Amazon Rainforest', 'Amazon'])
+  -- 16/100 done, 14 passed, 98s
+  [10] web_search_10: FAIL  (expected: ['27'])
+  -- 17/100 done, 14 passed, 98s
+  [19] web_search_19: PASS  (expected: ['2023-02-12'])
+  -- 18/100 done, 15 passed, 108s
+  [18] web_search_18: FAIL  (expected: ['Milo the Lynx', 'Milo'])
+  -- 19/100 done, 15 passed, 110s
+  [20] web_search_20: FAIL  (expected: ['3'])
+  -- 20/100 done, 15 passed, 110s
+  [24] web_search_24: PASS  (expected: ['1992'])
+  -- 21/100 done, 16 passed, 117s
+  [23] web_search_23: PASS  (expected: ['Czechoslovakia', 'Czechoslovak', 'ČSSR'])
+  -- 22/100 done, 17 passed, 121s
+  [22] web_search_22: FAIL  (expected: ['2006'])
+  -- 23/100 done, 17 passed, 121s
+  [25] web_search_25: PASS  (expected: ['03/29/2024'])
+  -- 24/100 done, 18 passed, 121s
+  [21] web_search_21: PASS  (expected: ['Warren Buffett', 'Warren Edward Buffett'])
+  -- 25/100 done, 19 passed, 132s
+  [26] web_search_26: PASS  (expected: ["Finneas O'Connell", 'Finneas', "Finneas Baird O'Connell"])
+  -- 26/100 done, 20 passed, 140s
+  [29] web_search_29: PASS  (expected: ['Olivier Faure'])
+  -- 27/100 done, 21 passed, 146s
+  [30] web_search_30: PASS  (expected: ['Belgium'])
+  -- 28/100 done, 22 passed, 152s
+  [17] web_search_17: PASS  (expected: ['Samuel', 'Sam'])
+  -- 29/100 done, 23 passed, 156s
+  [27] web_search_27: PASS  (expected: ['2025-01-31'])
+  -- 30/100 done, 24 passed, 157s
+  [33] web_search_33: PASS  (expected: ['Alice Walton', 'Alice Louise Walton'])
+  -- 31/100 done, 25 passed, 166s
+  [32] web_search_32: PASS  (expected: ['Yuriko Koike', 'Koike Yuriko'])
+  -- 32/100 done, 26 passed, 169s
+  [34] web_search_34: PASS  (expected: ['Hawaii'])
+  -- 33/100 done, 27 passed, 169s
+  [35] web_search_35: PASS  (expected: ['one', '1'])
+  -- 34/100 done, 28 passed, 171s
+  [37] web_search_37: FAIL  (expected: ['2003'])
+  -- 35/100 done, 28 passed, 177s
+  [38] web_search_38: PASS  (expected: ['TOSS'])
+  -- 36/100 done, 29 passed, 177s
+  [31] web_search_31: PASS  (expected: ['Valdemar Costa Neto'])
+  -- 37/100 done, 30 passed, 178s
+  [28] web_search_28: PASS  (expected: ['Charlie Campbell'])
+  -- 38/100 done, 31 passed, 178s
+  [40] web_search_40: PASS  (expected: ['KU Leuven', 'Katholieke Universiteit Leuven'])
+  -- 39/100 done, 32 passed, 184s
+  [43] web_search_43: PASS  (expected: ['2024-10-18'])
+  -- 40/100 done, 33 passed, 191s
+  [36] web_search_36: PASS  (expected: ['Georgetown University', 'GU'])
+  -- 41/100 done, 34 passed, 192s
+  [41] web_search_41: PASS  (expected: ['1957'])
+  -- 42/100 done, 35 passed, 195s
+  [45] web_search_45: PASS  (expected: ['Aisen Nikolayev', 'Aysen Nikolayev', 'Aysen Sergeyevich Nikolayev'])
+  -- 43/100 done, 36 passed, 197s
+  [46] web_search_46: PASS  (expected: ['Christian Democratic Union', 'CDU'])
+  -- 44/100 done, 37 passed, 202s
+  [39] web_search_39: FAIL  (expected: ['1992'])
+  -- 45/100 done, 37 passed, 203s
+  [44] web_search_44: PASS  (expected: ['Ginny Sutcliffe'])
+  -- 46/100 done, 38 passed, 207s
+  [47] web_search_47: PASS  (expected: ['El Bulli'])
+  -- 47/100 done, 39 passed, 207s
+  [42] web_search_42: PASS  (expected: ['Jayson Tatum', 'Jayson Christopher Tatum'])
+  -- 48/100 done, 40 passed, 209s
+  [50] web_search_50: PASS  (expected: ['Slovenia'])
+  -- 49/100 done, 41 passed, 214s
+  [48] web_search_48: PASS  (expected: ['Daniel Bumba'])
+  -- 50/100 done, 42 passed, 216s
+  [51] web_search_51: PASS  (expected: ['$222 million', '222 million', '222'])
+  -- 51/100 done, 43 passed, 219s
+  [49] web_search_49: FAIL  (expected: ['Atlantic Records'])
+  -- 52/100 done, 43 passed, 219s
+  [53] web_search_53: PASS  (expected: ['75', '76'])
+  -- 53/100 done, 44 passed, 222s
+  [56] web_search_56: PASS  (expected: ['406200'])
+  -- 54/100 done, 45 passed, 228s
+  [52] web_search_52: FAIL  (expected: ['Michael Portier'])
+  -- 55/100 done, 45 passed, 235s
+  [55] web_search_55: PASS  (expected: ['Joseph Polisena Jr.', 'Joseph M. Polisena, Jr.'])
+  -- 56/100 done, 46 passed, 235s
+  [57] web_search_57: PASS  (expected: ['1-8'])
+  -- 57/100 done, 47 passed, 238s
+  [59] web_search_59: PASS  (expected: ['1960/03/04'])
+  -- 58/100 done, 48 passed, 244s
+  [58] web_search_58: PASS  (expected: ['Shawanda Evans'])
+  -- 59/100 done, 49 passed, 249s
+  [60] web_search_60: PASS  (expected: ['Sarah Creasey'])
+  -- 60/100 done, 50 passed, 253s
+  [61] web_search_61: PASS  (expected: ['7'])
+  -- 61/100 done, 51 passed, 253s
+  [63] web_search_63: PASS  (expected: ['3'])
+  -- 62/100 done, 52 passed, 264s
+  [62] web_search_62: PASS  (expected: ['Order of St. Andrew', 'Order of Saint Andrew'])
+  -- 63/100 done, 53 passed, 268s
+  [64] web_search_64: PASS  (expected: ['185'])
+  -- 64/100 done, 54 passed, 269s
+  [65] web_search_65: PASS  (expected: ['Andy Flower'])
+  -- 65/100 done, 55 passed, 271s
+  [54] web_search_54: FAIL  (expected: ['Stuart McPherson'])
+  -- 66/100 done, 55 passed, 275s
+  [66] web_search_66: PASS  (expected: ['Saadiya Ahmed', 'Saadiya'])
+  -- 67/100 done, 56 passed, 282s
+  [71] web_search_71: PASS  (expected: ['116,175', '116175'])
+  -- 68/100 done, 57 passed, 289s
+  [67] web_search_67: PASS  (expected: ['Edward Owens'])
+  -- 69/100 done, 58 passed, 291s
+  [73] web_search_73: PASS  (expected: ['Medjugorje'])
+  -- 70/100 done, 59 passed, 301s
+  [69] web_search_69: PASS  (expected: ['Predrag Puharić', 'Predrag'])
+  -- 71/100 done, 60 passed, 308s
+  [72] web_search_72: PASS  (expected: ['Ashiya, Hyōgo', 'Ashiya'])
+  -- 72/100 done, 61 passed, 308s
+  [68] web_search_68: FAIL  (expected: ['03/01'])
+  -- 73/100 done, 61 passed, 314s
+  [76] web_search_76: PASS  (expected: ['Teshome Quankusie'])
+  -- 74/100 done, 62 passed, 322s
+  [70] web_search_70: FAIL  (expected: ['Madrid'])
+  -- 75/100 done, 62 passed, 323s
+  [78] web_search_78: PASS  (expected: ['Ricardo Gallardo Cardona'])
+  -- 76/100 done, 63 passed, 333s
+  [74] web_search_74: FAIL  (expected: ['6828925'])
+  -- 77/100 done, 63 passed, 334s
+  [75] web_search_75: PASS  (expected: ['Saadiya'])
+  -- 78/100 done, 64 passed, 338s
+  [77] web_search_77: FAIL  (expected: ['Almin Karamehmedovic', 'Wendy A. McMahon', 'Wendy McMahon'])
+  -- 79/100 done, 64 passed, 339s
+  [79] web_search_79: PASS  (expected: ['0', 'zero'])
+  -- 80/100 done, 65 passed, 344s
+  [80] web_search_80: PASS  (expected: ['1996-10-16'])
+  -- 81/100 done, 66 passed, 345s
+  [82] web_search_82: PASS  (expected: ['Sheikh'])
+  -- 82/100 done, 67 passed, 350s
+  [81] web_search_81: PASS  (expected: ['Paris'])
+  -- 83/100 done, 68 passed, 360s
+  [85] web_search_85: PASS  (expected: ['Mid laner'])
+  -- 84/100 done, 69 passed, 363s
+  [84] web_search_84: PASS  (expected: ['Gong Zheng'])
+  -- 85/100 done, 70 passed, 368s
+  [83] web_search_83: PASS  (expected: ['3', 'three'])
+  -- 86/100 done, 71 passed, 368s
+  [89] web_search_89: PASS  (expected: ['Jari Latvala'])
+  -- 87/100 done, 72 passed, 378s
+  [90] web_search_90: PASS  (expected: ['Robert Avery'])
+  -- 88/100 done, 73 passed, 385s
+  [86] web_search_86: PASS  (expected: ['1.82', '182', '6 ft 0 in'])
+  -- 89/100 done, 74 passed, 387s
+  [91] web_search_91: PASS  (expected: ['1991/09/09'])
+  [88] web_search_88: PASS  (expected: ['Tracy Dixon'])
+  -- 90/100 done, 75 passed, 388s
+  -- 91/100 done, 76 passed, 388s
+  [93] web_search_93: PASS  (expected: ['Todd Gloria', 'Todd Rex Gloria'])
+  -- 92/100 done, 77 passed, 404s
+  [92] web_search_92: FAIL  (expected: ['1960-08-22'])
+  -- 93/100 done, 77 passed, 405s
+  [87] web_search_87: PASS  (expected: ['Aston Villa'])
+  -- 94/100 done, 78 passed, 406s
+  [95] web_search_95: PASS  (expected: ['Elke Büdenbender', 'Elke Budenbender'])
+  -- 95/100 done, 79 passed, 411s
+  [97] web_search_97: PASS  (expected: ['Salem'])
+  -- 96/100 done, 80 passed, 412s
+  [94] web_search_94: PASS  (expected: ['Yoshiko Nakamura', 'Yoshiko Ishiba'])
+  -- 97/100 done, 81 passed, 417s
+  [98] web_search_98: PASS  (expected: ['49'])
+  -- 98/100 done, 82 passed, 420s
+  [99] web_search_99: PASS  (expected: ['2', 'two'])
+  -- 99/100 done, 83 passed, 420s
+  [96] web_search_96: PASS  (expected: ['Chris Brownridge'])
+  -- 100/100 done, 84 passed, 436s
+  web_search_no_snippet: 84/100 (84.0%) in 436s
+
+
+Total evaluation time: 1015s (16.9m)
+
+====================================================================================================
+  GLYPHH — BFCL V4 FULL EVALUATION REPORT
+  Model: claude-haiku-4-5-20251001
+====================================================================================================
+
+  Category                            Acc  Correct  Total      InTok     OutTok  Calls    Cost$  Lat Mean   Lat SD  Lat P95
+  -------------------------------------------------------------------------------------------------------------------------
+
+  AGENTIC — MEMORY
+  │ memory_kv                      87.1%      135    155          0          0      0  0.0000     0.02s    0.01s    0.03s
+  │ memory_vector                  87.1%      135    155          0          0      0  0.0000     0.01s    0.00s    0.02s
+  │ memory_rec_sum                 87.1%      135    155          0          0      0  0.0000     0.01s    0.00s    0.02s
+
+  AGENTIC — WEB SEARCH
+  │ web_search_base                74.0%       74    100  3,176,628     77,930    530  2.8530    23.99s   14.51s   49.72s
+  │ web_search_no_snippet          84.0%       84    100  5,226,473    106,475    741  4.6071    21.05s   14.90s   57.04s
+
+  ===============================================================================================
+  V4 COMPOSITE SCORES:
+    Non-Live                     N/A (10%)
+    Hallucination                N/A (10%)
+    Live                         N/A (10%)
+    Multi-Turn                   N/A (30%)
+      Memory Summary           87.1%
+      Web Search Summary       79.0%
+    Agentic                    83.0% (40%)
+
+    OVERALL.................   83.0%  (40% of V4 weight)
+
+  TOTAL TOKEN USAGE:
+    Input tokens:     8,403,101
+    Output tokens:      184,405
+    Total tokens:     8,587,506
+    API calls:            1,271
+    Total cost:    $     7.4601
+
+  OVERALL LATENCY:
+    Mean:      6.78s
+    SD:       13.11s
+    P95:      33.89s
+  ===============================================================================================
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/agentic/memory/kv/BFCL_v4_memory_kv_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/vector/BFCL_v4_memory_vector_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/rec_sum/BFCL_v4_memory_rec_sum_result.json
+  Exported: result/glyphh-ada-1.1/agentic/web_search/BFCL_v4_web_search_base_result.json
+  Exported: result/glyphh-ada-1.1/agentic/web_search/BFCL_v4_web_search_no_snippet_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/

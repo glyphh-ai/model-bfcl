@@ -1,0 +1,98 @@
+BFCL V4 Full Evaluation
+Model: claude-haiku-4-5-20251001
+Sections: ['live']
+Routing workers: 5
+Multi-turn workers: 3
+Web search workers: 5
+
+── live_simple (workers=5) ──
+  live_simple: 50/258 done, 43 correct, 41s
+  live_simple: 100/258 done, 86 correct, 75s
+  live_simple: 150/258 done, 128 correct, 110s
+  live_simple: 200/258 done, 172 correct, 143s
+  live_simple: 250/258 done, 215 correct, 179s
+  live_simple: 258/258 done, 219 correct, 185s
+  live_simple: 219/258 (84.9%) in 185s
+
+── live_multiple (workers=5) ──
+  live_multiple: 50/1053 done, 39 correct, 54s
+  live_multiple: 100/1053 done, 81 correct, 107s
+  live_multiple: 150/1053 done, 121 correct, 170s
+  live_multiple: 200/1053 done, 160 correct, 223s
+  live_multiple: 250/1053 done, 196 correct, 274s
+  live_multiple: 300/1053 done, 235 correct, 318s
+  live_multiple: 350/1053 done, 275 correct, 376s
+  live_multiple: 400/1053 done, 318 correct, 421s
+  live_multiple: 450/1053 done, 357 correct, 479s
+  live_multiple: 500/1053 done, 394 correct, 535s
+  live_multiple: 550/1053 done, 434 correct, 590s
+  live_multiple: 600/1053 done, 465 correct, 644s
+  live_multiple: 650/1053 done, 495 correct, 694s
+  live_multiple: 700/1053 done, 529 correct, 756s
+  live_multiple: 750/1053 done, 564 correct, 809s
+  live_multiple: 800/1053 done, 601 correct, 860s
+  live_multiple: 850/1053 done, 638 correct, 906s
+  live_multiple: 900/1053 done, 669 correct, 964s
+  live_multiple: 950/1053 done, 697 correct, 1013s
+  live_multiple: 1000/1053 done, 727 correct, 1058s
+  live_multiple: 1050/1053 done, 756 correct, 1108s
+  live_multiple: 1053/1053 done, 757 correct, 1109s
+  live_multiple: 757/1053 (71.9%) in 1109s
+
+── live_parallel (workers=5) ──
+  live_parallel: 16/16 done, 12 correct, 15s
+  live_parallel: 12/16 (75.0%) in 15s
+
+── live_parallel_multiple (workers=5) ──
+  live_parallel_multiple: 24/24 done, 18 correct, 29s
+  live_parallel_multiple: 18/24 (75.0%) in 29s
+
+
+Total evaluation time: 1338s (22.3m)
+
+====================================================================================================
+  GLYPHH — BFCL V4 FULL EVALUATION REPORT
+  Model: claude-haiku-4-5-20251001
+====================================================================================================
+
+  Category                            Acc  Correct  Total      InTok     OutTok  Calls    Cost$  Lat Mean   Lat SD  Lat P95
+  -------------------------------------------------------------------------------------------------------------------------
+
+  LIVE (10%)
+  │ live_simple                    84.9%      219    258    204,275     25,595    257  0.2658     3.53s    0.89s    4.85s
+  │ live_multiple                  71.9%      757   1053  1,209,178    112,573  1,053  1.4176     5.26s    1.66s    8.10s
+  │ live_parallel                  75.0%       12     16     12,621      2,984     16  0.0220     4.39s    1.07s    6.60s
+  │ live_parallel_multiple         75.0%       18     24     35,282      3,883     24  0.0438     5.68s    2.15s    8.84s
+
+  ===============================================================================================
+  V4 COMPOSITE SCORES:
+    Non-Live                     N/A (10%)
+    Hallucination                N/A (10%)
+    Live                       76.7% (10%)
+    Multi-Turn                   N/A (30%)
+      Memory Summary             N/A
+      Web Search Summary         N/A
+    Agentic                      N/A (40%)
+
+    OVERALL.................   76.7%  (10% of V4 weight)
+
+  TOTAL TOKEN USAGE:
+    Input tokens:     1,461,356
+    Output tokens:      145,035
+    Total tokens:     1,606,391
+    API calls:            1,350
+    Total cost:    $     1.7492
+
+  OVERALL LATENCY:
+    Mean:      4.93s
+    SD:        1.69s
+    P95:       7.92s
+  ===============================================================================================
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_simple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_multiple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_multiple_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/

@@ -1,0 +1,24 @@
+Running multi_turn_base: 200 entries, 3 workers
+  [10/200] 9 passed (90%) 71s
+  [20/200] 16 passed (80%) 120s
+  [30/200] 22 passed (73%) 163s
+  [40/200] 30 passed (75%) 218s
+  [50/200] 35 passed (70%) 251s
+  [60/200] 41 passed (68%) 322s
+  [70/200] 48 passed (69%) 393s
+  [80/200] 55 passed (69%) 452s
+  [90/200] 62 passed (69%) 515s
+  [100/200] 68 passed (68%) 574s
+  [110/200] 75 passed (68%) 633s
+  [120/200] 82 passed (68%) 684s
+  [130/200] 86 passed (66%) 734s
+  [140/200] 95 passed (68%) 787s
+  [150/200] 102 passed (68%) 832s
+  [160/200] 105 passed (66%) 887s
+  [170/200] 109 passed (64%) 943s
+  [180/200] 113 passed (63%) 1017s
+  [190/200] 116 passed (61%) 1080s
+  [200/200] 117 passed (58%) 1153s
+
+multi_turn_base: 117/200 (58.5%) in 1153s
+Results saved to results/full-eval and gorilla dir

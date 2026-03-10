@@ -1,0 +1,46 @@
+BFCL V4 Full Evaluation
+Model: claude-haiku-4-5-20251001
+Sections: ['multi_turn']
+Routing workers: 5
+Multi-turn workers: 3
+Web search workers: 5
+
+── multi_turn_base ──
+  [1/200] multi_turn_base_1: PASS  (1 passed, 20s)
+  [2/200] multi_turn_base_0: PASS  (2 passed, 24s)
+  [3/200] multi_turn_base_2: FAIL  (2 passed, 25s)
+  [4/200] multi_turn_base_3: PASS  (3 passed, 31s)
+  [5/200] multi_turn_base_4: FAIL  (3 passed, 35s)
+  [6/200] multi_turn_base_5: FAIL  (3 passed, 40s)
+  [7/200] multi_turn_base_7: PASS  (4 passed, 48s)
+  [8/200] multi_turn_base_6: PASS  (5 passed, 50s)
+  [9/200] multi_turn_base_8: FAIL  (5 passed, 53s)
+  [10/200] multi_turn_base_11: FAIL  (5 passed, 58s)
+  [11/200] multi_turn_base_9: FAIL  (5 passed, 66s)
+  [12/200] multi_turn_base_12: PASS  (6 passed, 66s)
+  [13/200] multi_turn_base_10: FAIL  (6 passed, 70s)
+  [14/200] multi_turn_base_13: PASS  (7 passed, 74s)
+  [15/200] multi_turn_base_14: PASS  (8 passed, 80s)
+  [16/200] multi_turn_base_16: PASS  (9 passed, 85s)
+  [17/200] multi_turn_base_15: FAIL  (9 passed, 86s)
+  [18/200] multi_turn_base_17: PASS  (10 passed, 94s)
+  [19/200] multi_turn_base_19: PASS  (11 passed, 95s)
+  [20/200] multi_turn_base_20: PASS  (12 passed, 103s)
+  [21/200] multi_turn_base_21: PASS  (13 passed, 105s)
+  [22/200] multi_turn_base_18: FAIL  (13 passed, 107s)
+  [23/200] multi_turn_base_23: PASS  (14 passed, 113s)
+  [24/200] multi_turn_base_22: PASS  (15 passed, 118s)
+  [25/200] multi_turn_base_25: FAIL  (15 passed, 122s)
+  [26/200] multi_turn_base_26: PASS  (16 passed, 125s)
+  [27/200] multi_turn_base_24: FAIL  (16 passed, 128s)
+  [28/200] multi_turn_base_27: PASS  (17 passed, 134s)
+  [29/200] multi_turn_base_29: PASS  (18 passed, 134s)
+  [30/200] multi_turn_base_28: FAIL  (18 passed, 140s)
+  [31/200] multi_turn_base_31: FAIL  (18 passed, 142s)
+  [32/200] multi_turn_base_30: FAIL  (18 passed, 142s)
+  [33/200] multi_turn_base_34: FAIL  (18 passed, 150s)
+  [34/200] multi_turn_base_32: PASS  (19 passed, 152s)
+  [35/200] multi_turn_base_33: FAIL  (19 passed, 158s)
+  [36/200] multi_turn_base_35: PASS  (20 passed, 166s)
+  [37/200] multi_turn_base_36: PASS  (21 passed, 167s)
+  [38/200] multi_turn_base_37: FAIL  (21 passed, 169s)
