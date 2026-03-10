@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
 data/bfcl/
-results/
+results/multi-turn/
+results/full-eval/*.log
 .env
