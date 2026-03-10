@@ -61,6 +61,7 @@ from bfcl_eval.model_handler.utils import convert_to_function_call as gorilla_co
 from scorer import BFCLModelScorer, _CLASS_DIR_MAP
 from sidecar import IrrelevanceSidecar
 from memory import MemoryHandler
+from multi_turn_handler import MultiTurnHandler
 
 # ── Configuration ────────────────────────────────────────────────────────
 
@@ -715,7 +716,15 @@ def _hdc_route(query: str, scorers: dict, all_func_defs: list[dict],
 
 def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                   category: str) -> dict:
-    """Run one multi-turn entry. Returns result dict with pass/fail + tokens + latency."""
+    """Run one multi-turn entry — hybrid HDC routing + CognitiveLoop + multi-step LLM loop.
+
+    Architecture:
+      1. MultiTurnHandler provides HDC routing (tool filtering) + CognitiveLoop (CWD tracking)
+      2. Native tool_use multi-step loop (Claude can course-correct with execution feedback)
+      3. CognitiveLoop state updated after each step
+
+    Returns result dict with pass/fail + tokens + latency + gorilla-format result.
+    """
     scenario_id = entry["id"]
     ground_truth = gt_entry["ground_truth"]
     initial_config = entry.get("initial_config", {})
@@ -727,28 +736,15 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     for turn_funcs in holdout_raw.values():
         excluded.extend(turn_funcs)
     func_defs = load_func_defs(involved_classes, excluded)
-    scorers = _setup_hdc_scorers(involved_classes)
-
-    all_tools = []
-    seen_tool_names = set()
-    for fd in func_defs:
-        tool = _to_anthropic_tool(fd)
-        if tool["name"] not in seen_tool_names:
-            all_tools.append(tool)
-            seen_tool_names.add(tool["name"])
-
-    system_prompt = _build_mt_system_prompt(initial_config)
 
     # missed_function: map of turn_idx -> list of function names to add back at that turn
     holdout_function = entry.get("missed_function", {})
-    # Pre-load held-out function defs (load all funcs, find the ones that were excluded)
-    holdout_func_defs = {}  # name -> func_def (with class prefix)
+    holdout_func_defs = {}  # bare_name -> func_def (with class prefix)
     if holdout_function:
         all_func_defs_full = load_func_defs(involved_classes)  # no exclusions
         excluded_names = {fd["name"] for fd in func_defs}
         for fd in all_func_defs_full:
             if fd["name"] not in excluded_names:
-                # Strip class prefix to get bare name
                 bare = fd["name"].split(".", 1)[-1] if "." in fd["name"] else fd["name"]
                 holdout_func_defs[bare] = fd
 
@@ -761,110 +757,140 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
         else:
             queries.append("")
 
+    # Setup MultiTurnHandler for HDC routing + CognitiveLoop
+    handler = MultiTurnHandler()
+    handler.setup(entry, func_defs)
+
+    # Build system prompt with state context
+    system_prompt = _build_mt_system_prompt(initial_config)
+
     messages = []
     all_turn_decoded = []
-    all_turn_gorilla = []  # gorilla-format: per-turn list of step results for export
+    all_turn_gorilla = []
     token_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
     t0 = time.time()
 
-    for turn_idx, query in enumerate(queries):
-        # Check if this is a holdout turn — add back held-out functions
-        if str(turn_idx) in holdout_function:
-            for hf_name in holdout_function[str(turn_idx)]:
-                if hf_name in holdout_func_defs:
-                    fd = holdout_func_defs[hf_name]
-                    func_defs.append(fd)
+    try:
+        for turn_idx, query in enumerate(queries):
+            # Check if this is a holdout turn — add back held-out functions
+            if str(turn_idx) in holdout_function:
+                added_fds = []
+                for hf_name in holdout_function[str(turn_idx)]:
+                    if hf_name in holdout_func_defs:
+                        fd = holdout_func_defs[hf_name]
+                        func_defs.append(fd)
+                        added_fds.append(fd)
+                if added_fds:
+                    handler.add_functions(added_fds)
+                query = "I have updated some more functions you can choose from. What about now?"
+
+            if not query:
+                all_turn_decoded.append([])
+                all_turn_gorilla.append([])
+                handler.record_turn("", [])
+                continue
+
+            # HDC route to get filtered tools + CWD from CognitiveLoop
+            filtered_defs, current_cwd = handler.get_filtered_tools_and_cwd(query)
+            filtered_tools = []
+            filtered_names = set()
+            for fd in filtered_defs:
+                tool = _to_anthropic_tool(fd)
+                if tool["name"] not in filtered_names:
+                    filtered_tools.append(tool)
+                    filtered_names.add(tool["name"])
+
+            # Fallback to all tools if filtering produced nothing
+            if not filtered_tools:
+                for fd in func_defs:
                     tool = _to_anthropic_tool(fd)
-                    if tool["name"] not in seen_tool_names:
-                        all_tools.append(tool)
-                        seen_tool_names.add(tool["name"])
-            # Send the "updated functions" message instead of skipping
-            query = "I have updated some more functions you can choose from. What about now?"
+                    if tool["name"] not in filtered_names:
+                        filtered_tools.append(tool)
+                        filtered_names.add(tool["name"])
 
-        if not query:
-            all_turn_decoded.append([])
-            all_turn_gorilla.append([])
-            continue
+            # Inject CWD into system prompt for this turn
+            turn_system = system_prompt
+            if current_cwd and current_cwd != "/":
+                turn_system += f"\n\nCURRENT WORKING DIRECTORY: {current_cwd}\nYou are ALREADY inside '{current_cwd}'. Do NOT cd into '{current_cwd}'."
 
-        filtered_defs, top_matches = _hdc_route(query, scorers, func_defs, involved_classes)
-        filtered_tools = []
-        filtered_names = set()
-        for fd in filtered_defs:
-            tool = _to_anthropic_tool(fd)
-            if tool["name"] not in filtered_names:
-                filtered_tools.append(tool)
-                filtered_names.add(tool["name"])
+            messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
 
-        tools = filtered_tools if filtered_tools else all_tools
+            turn_steps = []
+            turn_gorilla_steps = []
+            turn_raw_calls = []
+            step = 0
 
-        # No hint injection — let the LLM decide from available tools
-        messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
+            while step < MAX_STEPS_PER_TURN:
+                try:
+                    response = client.messages.create(
+                        model=MODEL, temperature=0.0, max_tokens=4096,
+                        system=turn_system, tools=filtered_tools, messages=messages,
+                    )
+                except Exception as e:
+                    safe_print(f"    API error ({scenario_id}): {e}")
+                    break
 
-        turn_steps = []
-        turn_gorilla_steps = []
-        step = 0
+                if hasattr(response, "usage") and response.usage:
+                    token_usage["input_tokens"] += response.usage.input_tokens
+                    token_usage["output_tokens"] += response.usage.output_tokens
+                token_usage["api_calls"] += 1
 
-        while step < MAX_STEPS_PER_TURN:
-            try:
-                response = client.messages.create(
-                    model=MODEL, temperature=0.0, max_tokens=4096,
-                    system=system_prompt, tools=tools, messages=messages,
+                tool_uses = [b for b in response.content if b.type == "tool_use"]
+
+                assistant_content = []
+                for block in response.content:
+                    if block.type == "text":
+                        assistant_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        assistant_content.append({
+                            "type": "tool_use", "id": block.id,
+                            "name": block.name, "input": block.input,
+                        })
+                messages.append({"role": "assistant", "content": assistant_content})
+
+                if not tool_uses:
+                    break
+
+                call_strings = []
+                gorilla_step = []
+                step_raw_calls = []
+                for tu in tool_uses:
+                    arg_parts = [f"{k}={repr(v)}" for k, v in tu.input.items()]
+                    call_strings.append(f"{tu.name}({', '.join(arg_parts)})")
+                    gorilla_step.append({tu.name: json.dumps(tu.input)})
+                    step_raw_calls.append({tu.name: tu.input})
+
+                turn_steps.append(call_strings)
+                turn_gorilla_steps.append(gorilla_step)
+                turn_raw_calls.extend(step_raw_calls)
+
+                # Update CognitiveLoop state from this step's calls
+                handler.update_state(step_raw_calls)
+
+                # Execute and feed results back to Claude
+                execution_results, _ = execute_multi_turn_func_call(
+                    call_strings, initial_config, involved_classes,
+                    f"full_eval_{scenario_id}", scenario_id,
                 )
-            except Exception as e:
-                safe_print(f"    API error ({scenario_id}): {e}")
-                break
 
-            if hasattr(response, "usage") and response.usage:
-                token_usage["input_tokens"] += response.usage.input_tokens
-                token_usage["output_tokens"] += response.usage.output_tokens
-            token_usage["api_calls"] += 1
+                tool_results_content = []
+                for tu, result in zip(tool_uses, execution_results):
+                    result_str = str(result)
+                    tr = {"type": "tool_result", "tool_use_id": tu.id, "content": result_str}
+                    if result_str.startswith("Error during execution:"):
+                        tr["is_error"] = True
+                    tool_results_content.append(tr)
+                messages.append({"role": "user", "content": tool_results_content})
 
-            tool_uses = [b for b in response.content if b.type == "tool_use"]
+                step += 1
+                if response.stop_reason == "end_turn":
+                    break
 
-            assistant_content = []
-            for block in response.content:
-                if block.type == "text":
-                    assistant_content.append({"type": "text", "text": block.text})
-                elif block.type == "tool_use":
-                    assistant_content.append({
-                        "type": "tool_use", "id": block.id,
-                        "name": block.name, "input": block.input,
-                    })
-            messages.append({"role": "assistant", "content": assistant_content})
-
-            if not tool_uses:
-                break
-
-            call_strings = []
-            gorilla_step = []
-            for tu in tool_uses:
-                arg_parts = [f"{k}={repr(v)}" for k, v in tu.input.items()]
-                call_strings.append(f"{tu.name}({', '.join(arg_parts)})")
-                gorilla_step.append({tu.name: json.dumps(tu.input)})
-
-            turn_steps.append(call_strings)
-            turn_gorilla_steps.append(gorilla_step)
-
-            execution_results, _ = execute_multi_turn_func_call(
-                call_strings, initial_config, involved_classes,
-                f"full_eval_{scenario_id}", scenario_id,
-            )
-
-            tool_results_content = []
-            for tu, result in zip(tool_uses, execution_results):
-                result_str = str(result)
-                tr = {"type": "tool_result", "tool_use_id": tu.id, "content": result_str}
-                if result_str.startswith("Error during execution:"):
-                    tr["is_error"] = True
-                tool_results_content.append(tr)
-            messages.append({"role": "user", "content": tool_results_content})
-
-            step += 1
-            if response.stop_reason == "end_turn":
-                break
-
-        all_turn_decoded.append(turn_steps)
-        all_turn_gorilla.append(turn_gorilla_steps)
+            all_turn_decoded.append(turn_steps)
+            all_turn_gorilla.append(turn_gorilla_steps)
+            handler.record_turn(query, turn_raw_calls)
+    finally:
+        handler.reset()
 
     latency = time.time() - t0
 

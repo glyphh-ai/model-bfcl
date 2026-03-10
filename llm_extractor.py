@@ -389,6 +389,35 @@ class LLMArgumentExtractor:
         except Exception:
             return self._fallback_extract(query, func_defs)
 
+    @staticmethod
+    def _to_anthropic_tool(fd: dict) -> dict:
+        """Convert BFCL func def to Anthropic native tool schema."""
+        full_name = fd.get("name", "")
+        bare_name = full_name.split(".")[-1] if "." in full_name else full_name
+        params = fd.get("parameters", {})
+
+        # Convert BFCL "dict" type to JSON Schema "object"
+        input_schema = dict(params)
+        if input_schema.get("type") == "dict":
+            input_schema["type"] = "object"
+        # Ensure properties exist
+        if "properties" not in input_schema:
+            input_schema["properties"] = {}
+        # Convert property types too
+        for prop_name, prop in input_schema.get("properties", {}).items():
+            if isinstance(prop, dict) and prop.get("type") == "dict":
+                prop["type"] = "object"
+            if isinstance(prop, dict) and prop.get("type") == "array":
+                items = prop.get("items", {})
+                if isinstance(items, dict) and items.get("type") == "dict":
+                    items["type"] = "object"
+
+        return {
+            "name": bare_name,
+            "description": fd.get("description", ""),
+            "input_schema": input_schema,
+        }
+
     def route_and_extract_turn(
         self,
         query: str,
@@ -396,138 +425,119 @@ class LLMArgumentExtractor:
         conversation_history: list[str],
         previous_calls: list[list[dict]],
         initial_config: dict | None = None,
+        current_cwd: str | None = None,
     ) -> list[dict]:
-        """Full function selection + argument extraction for one multi-turn step.
+        """Full function selection + argument extraction using native tool_use.
 
-        Unlike extract_multi_turn(), this method decides WHICH functions to call
-        (not just what args). HDC handles class routing; LLM handles per-turn
-        function selection within the available functions.
-
-        Args:
-            query: Current turn's user query.
-            all_func_defs: ALL available function definitions for the entry.
-            conversation_history: Previous turn queries.
-            previous_calls: Previous turns' function calls [[{fn: args}, ...], ...]
-            initial_config: Initial state of API instances.
+        Uses Anthropic's native tool calling (not JSON prompt) for structured
+        output. HDC handles class routing; LLM picks from candidates via tools.
 
         Returns:
             List of {bare_func_name: {param: value}} dicts.
         """
-        # Build function schema list with bare names
-        schemas = []
-        props_map = {}
+        # Build native Anthropic tools
+        tools = []
+        seen_names = set()
         for fd in all_func_defs:
-            full_name = fd.get("name", "")
-            bare_name = full_name.split(".")[-1] if "." in full_name else full_name
-            params = fd.get("parameters", {})
-            schemas.append({
-                "name": bare_name,
-                "description": fd.get("description", ""),
-                "parameters": params,
-            })
-            props_map[bare_name] = (
-                params.get("properties", {}) if isinstance(params, dict) else {}
-            )
+            tool = self._to_anthropic_tool(fd)
+            if tool["name"] not in seen_names:
+                tools.append(tool)
+                seen_names.add(tool["name"])
 
-        schema_str = json.dumps(schemas, indent=2)
+        if not tools:
+            return []
 
-        # Build state context
-        state_context = ""
+        # Build system prompt with state context
+        system_parts = []
+
+        system_parts.append(
+            "You are an expert in composing functions. You are given a question and a set of possible functions. "
+            "Based on the question, you will need to make one or more function/tool calls to achieve the purpose. "
+            "If none of the functions can be used, point it out and do not make any tool calls.\n\n"
+            "At each turn, you should try your best to complete the tasks requested by the user within the current turn. "
+            "Continue to output functions to call until you have fulfilled the user's request to the best of your ability. "
+            "Only call functions that are directly needed — do not add extra exploratory calls like pwd(), ls(), or find() "
+            "unless the user specifically asks for them."
+        )
+
+        # Filesystem state context
         if initial_config:
-            state_context = "Initial system state (use EXACT names from here):\n"
+            state_context = "\n\nSystem state (use EXACT names from here):\n"
             for cls_name, config in initial_config.items():
                 if "root" in config:
-                    state_context += f"  {cls_name} filesystem:\n"
-                    state_context += self._format_fs_tree(config["root"], indent=4)
+                    root = config["root"]
+                    root_name = list(root.keys())[0] if root else ""
+                    root_info = root.get(root_name, {})
+                    contents = root_info.get("contents", root_info) if isinstance(root_info, dict) else {}
+                    state_context += f"  {cls_name} filesystem (contents of {root_name}/):\n"
+                    state_context += self._format_fs_tree(contents, indent=4)
                 else:
                     state_context += f"  {cls_name}: {json.dumps(config)}\n"
-            state_context += "\n"
+            system_parts.append(state_context)
 
-        # Compute current working directory by simulating cd calls
-        cwd = self._compute_cwd(initial_config, previous_calls)
+        # CWD context
+        cwd = current_cwd if current_cwd is not None else self._compute_cwd(initial_config, previous_calls)
+        if cwd:
+            system_parts.append(
+                f"\nCURRENT WORKING DIRECTORY: {cwd}\n"
+                f"You are ALREADY inside '{cwd}'. Do NOT cd into '{cwd}'."
+            )
 
-        # Build conversation + action history
-        history = ""
-        if conversation_history or previous_calls:
-            history = "Conversation history:\n"
-            for ti in range(len(conversation_history)):
-                history += f"  Turn {ti + 1} query: {conversation_history[ti]}\n"
-                if ti < len(previous_calls) and previous_calls[ti]:
-                    calls_str = ", ".join(
-                        f"{fn}({', '.join(f'{k}={repr(v)}' for k, v in args.items())})"
-                        for call in previous_calls[ti]
-                        for fn, args in call.items()
-                        if isinstance(args, dict)
-                    )
-                    history += f"  Turn {ti + 1} calls: {calls_str}\n"
-            history += "\n"
+        system_prompt = "\n".join(system_parts)
 
-        cwd_context = f"CURRENT WORKING DIRECTORY: {cwd}\n\n" if cwd else ""
+        # Build messages: conversation history + current query
+        messages = []
+        for ti in range(len(conversation_history)):
+            messages.append({"role": "user", "content": conversation_history[ti]})
+            # Add previous turn's calls as assistant tool_use blocks
+            if ti < len(previous_calls) and previous_calls[ti]:
+                assistant_content = []
+                tool_results = []
+                for ci, call in enumerate(previous_calls[ti]):
+                    for fn, args in call.items():
+                        tool_use_id = f"call_{ti}_{ci}"
+                        assistant_content.append({
+                            "type": "tool_use",
+                            "id": tool_use_id,
+                            "name": fn,
+                            "input": args if isinstance(args, dict) else {},
+                        })
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": "OK",
+                        })
+                if assistant_content:
+                    messages.append({"role": "assistant", "content": assistant_content})
+                    messages.append({"role": "user", "content": tool_results})
 
-        prompt = (
-            "You are a function-calling agent in a multi-turn conversation.\n"
-            "Given the current query, conversation history, and available functions, "
-            "decide which functions to call and with what arguments.\n\n"
-            f"{state_context}"
-            f"{cwd_context}"
-            f"{history}"
-            f"Current query: {query}\n\n"
-            f"Available functions:\n```json\n{schema_str}\n```\n\n"
-            "Return ONLY a JSON array of function call objects. Each object has the "
-            "function name as key and an object of arguments as value.\n"
-            "Example: [{\"cd\": {\"folder\": \"documents\"}}, {\"mkdir\": {\"dir_name\": \"new\"}}, "
-            "{\"mv\": {\"source\": \"a.txt\", \"destination\": \"new\"}}]\n\n"
-            "CRITICAL RULES:\n"
-            "1. STATE PERSISTS ACROSS TURNS. You are currently in the directory shown above. "
-            "Do NOT cd to a directory you are already in.\n"
-            "2. cd is RELATIVE — it moves one level at a time from the CURRENT directory. "
-            "Use cd('..') to go up. You cannot cd to an absolute path.\n"
-            "3. Use EXACT file and directory names from the initial system state. "
-            "If the query says 'document folder' but the filesystem has 'documents', use 'documents'.\n"
-            "4. Track file locations: if a file was moved in a previous turn, it is now in the "
-            "new location. You must cd to that location to operate on it.\n"
-            "5. If the query asks to create a directory, include mkdir BEFORE moving files into it.\n"
-            "6. Every turn MUST have at least one function call. If unsure what the query needs, "
-            "pick the most relevant function(s) from the available list.\n"
-            "7. Include ALL required parameters for each function.\n"
-            "8. Order matters: cd before operations in that directory, mkdir before mv into it.\n"
-            "9. For parameters not mentioned, use the default from schema or sensible defaults.\n\n"
-            "JSON:"
-        )
+        # Current turn query
+        messages.append({"role": "user", "content": query})
 
         try:
             response = self._client.messages.create(
                 model=self._model,
                 temperature=self._temperature,
-                max_tokens=2048,
-                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4096,
+                system=system_prompt,
+                tools=tools,
+                messages=messages,
             )
             self.total_input_tokens += response.usage.input_tokens
             self.total_output_tokens += response.usage.output_tokens
             self.total_calls += 1
 
-            text = response.content[0].text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-                if text.endswith("```"):
-                    text = text[:-3]
-                text = text.strip()
+            # Extract tool_use blocks from response
+            calls = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    calls.append({block.name: block.input})
 
-            result = json.loads(text)
-            if not isinstance(result, list):
-                return []
-
-            coerced = []
-            for call in result:
-                if not isinstance(call, dict):
-                    continue
-                for fname, args in call.items():
-                    if isinstance(args, dict) and fname in props_map:
-                        args = self._coerce_types(args, props_map[fname])
-                    coerced.append({fname: args})
-            return coerced
+            return calls
 
         except Exception:
+            import traceback
+            traceback.print_exc()
             return []
 
     def _fallback_extract(self, query: str, func_defs: list[dict]) -> list[dict]:
