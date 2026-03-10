@@ -4,6 +4,8 @@ Glyphh HDC model for the [Berkeley Function Calling Leaderboard](https://gorilla
 
 Pure hyperdimensional computing — no LLM, no neural network. Deterministic HDC routing + schema-guided argument extraction.
 
+Built on [**Glyphh Ada 1.1**](https://www.glyphh.ai/products/runtime)
+
 ## Results (V4)
 
 | Category | Accuracy | Weight |
