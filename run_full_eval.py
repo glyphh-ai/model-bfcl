@@ -60,6 +60,7 @@ from bfcl_eval.model_handler.utils import convert_to_function_call as gorilla_co
 # Local imports
 from scorer import BFCLModelScorer, _CLASS_DIR_MAP
 from sidecar import IrrelevanceSidecar
+from irrelevance_model import IrrelevanceModel
 from memory import MemoryHandler
 from multi_turn_handler import MultiTurnHandler
 
@@ -414,12 +415,11 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
     scorer.configure_generic(func_defs)
     result = scorer.score(query)
 
-    # For irrelevance: use sidecar to validate the main encoder match
+    # For irrelevance: use dedicated IrrelevanceModel (parameter + name alignment)
     if is_irrelevance:
-        top_score = result.all_scores[0]["score"] if result.all_scores else 0.0
-        sidecar = IrrelevanceSidecar()
-        sidecar.configure(func_defs)
-        is_relevant = sidecar.is_relevant(query, top_score)
+        irr_model = IrrelevanceModel()
+        irr_model.configure(func_defs)
+        is_relevant = irr_model.is_relevant(query)
         is_irrelevant = not is_relevant
         latency = time.time() - t0
         gorilla_calls = [] if is_irrelevant else [{result.all_scores[0]["function"]: "{}"}]
