@@ -808,10 +808,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         filtered_tools.append(tool)
                         filtered_names.add(tool["name"])
 
-            # Inject CWD into system prompt for this turn
             turn_system = system_prompt
-            if current_cwd and current_cwd != "/":
-                turn_system += f"\n\nCURRENT WORKING DIRECTORY: {current_cwd}\nYou are ALREADY inside '{current_cwd}'. Do NOT cd into '{current_cwd}'."
 
             messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
 
