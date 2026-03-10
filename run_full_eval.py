@@ -444,6 +444,12 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
         matched_func_defs = func_defs[:3]  # fallback
 
     # ── LLM arg extraction: give matched functions as tools ──
+    # Build reverse map: underscore name → original dotted name
+    tool_name_map = {}
+    for fd in matched_func_defs:
+        orig = fd.get("name", "")
+        flat = re.sub(r"\.", "_", orig)
+        tool_name_map[flat] = orig
     tools = [_to_anthropic_tool_routing(fd) for fd in matched_func_defs]
 
     system = (
@@ -470,11 +476,12 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
 
     latency = time.time() - t0
 
-    # Extract tool calls from response — {func_name: {arg: value}} dicts
+    # Extract tool calls from response — restore original dotted names
     tool_calls = []
     for block in response.content:
         if block.type == "tool_use":
-            tool_calls.append({block.name: block.input})
+            orig_name = tool_name_map.get(block.name, block.name)
+            tool_calls.append({orig_name: block.input})
 
     # Build gorilla result format: JSON string of [{func: {args}}, ...]
     gorilla_result = json.dumps(tool_calls) if tool_calls else ""
@@ -500,7 +507,7 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
                 possible_answer=possible_answer,
                 language=lang,
                 test_category=category,
-                model_name="glyphh",
+                model_name="glyphh-ada-1.1",
             )
             correct = check.get("valid", False)
         except Exception:
@@ -1290,7 +1297,7 @@ def _gorilla_group(cat: str) -> str:
     return "non_live"
 
 
-GORILLA_MODEL_NAME = "glyphh-hdc-v1"
+GORILLA_MODEL_NAME = "glyphh-ada-1.1"
 
 
 def export_gorilla_results(all_results: list[CategoryResult]):
