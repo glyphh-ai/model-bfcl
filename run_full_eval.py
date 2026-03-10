@@ -443,51 +443,75 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
     if not matched_func_defs:
         matched_func_defs = func_defs[:3]  # fallback
 
-    # ── LLM arg extraction: give matched functions as tools ──
-    # Build reverse map: underscore name → original dotted name
-    tool_name_map = {}
-    for fd in matched_func_defs:
-        orig = fd.get("name", "")
-        flat = re.sub(r"\.", "_", orig)
-        tool_name_map[flat] = orig
-    tools = [_to_anthropic_tool_routing(fd) for fd in matched_func_defs]
+    # ── LLM arg extraction ──
+    # Detect language for Java/JS-specific prompting
+    if "java" in category and "javascript" not in category:
+        language = "java"
+    elif "javascript" in category:
+        language = "javascript"
+    else:
+        language = "python"
 
-    system = (
-        "You are an expert in composing functions. Based on the question, make one or more "
-        "function/tool calls to achieve the purpose. If none of the functions can be used, "
-        "point it out and refuse to make tool calls."
-    )
+    if language in ("java", "javascript") and extractor:
+        # Java/JS: use LLMArgumentExtractor with language-specific prompting
+        # (native tool_use returns JSON types; Java/JS need string representations)
+        if is_parallel:
+            gorilla_calls = extractor.extract_parallel(query, matched_func_defs)
+        else:
+            # Simple/multiple: HDC top-1 function, extract args
+            top_fd = matched_func_defs[0]
+            args = extractor.extract(query, top_fd, language=language)
+            gorilla_calls = [{top_fd["name"]: args}]
 
-    client = extractor._client if extractor else anthropic.Anthropic()
-
-    try:
-        response = client.messages.create(
-            model=MODEL, temperature=0.0, max_tokens=1024,
-            system=system, tools=tools if tools else None,
-            messages=[{"role": "user", "content": query}],
-        )
-        if response.usage:
-            token_usage["input_tokens"] += response.usage.input_tokens
-            token_usage["output_tokens"] += response.usage.output_tokens
+        token_usage["input_tokens"] = extractor.total_input_tokens - token_usage.get("_snap_in", 0)
+        token_usage["output_tokens"] = extractor.total_output_tokens - token_usage.get("_snap_out", 0)
         token_usage["api_calls"] += 1
-    except Exception as e:
-        return {"id": entry_id, "correct": False, "latency": time.time() - t0,
-                "tokens": token_usage}
+
+        # Convert to gorilla format: args as JSON strings
+        tool_calls = gorilla_calls
+        gorilla_calls = [{fn: json.dumps(args) for fn, args in call.items()}
+                         for call in gorilla_calls]
+    else:
+        # Python: use native Anthropic tool_use (returns correct JSON types)
+        tool_name_map = {}
+        for fd in matched_func_defs:
+            orig = fd.get("name", "")
+            flat = re.sub(r"\.", "_", orig)
+            tool_name_map[flat] = orig
+        tools = [_to_anthropic_tool_routing(fd) for fd in matched_func_defs]
+
+        system = (
+            "You are an expert in composing functions. Based on the question, make one or more "
+            "function/tool calls to achieve the purpose. If none of the functions can be used, "
+            "point it out and refuse to make tool calls."
+        )
+
+        client = extractor._client if extractor else anthropic.Anthropic()
+
+        try:
+            response = client.messages.create(
+                model=MODEL, temperature=0.0, max_tokens=1024,
+                system=system, tools=tools if tools else None,
+                messages=[{"role": "user", "content": query}],
+            )
+            if response.usage:
+                token_usage["input_tokens"] += response.usage.input_tokens
+                token_usage["output_tokens"] += response.usage.output_tokens
+            token_usage["api_calls"] += 1
+        except Exception as e:
+            return {"id": entry_id, "correct": False, "latency": time.time() - t0,
+                    "tokens": token_usage}
+
+        # Extract tool calls — restore original dotted names
+        tool_calls = []
+        gorilla_calls = []
+        for block in response.content:
+            if block.type == "tool_use":
+                orig_name = tool_name_map.get(block.name, block.name)
+                tool_calls.append({orig_name: block.input})
+                gorilla_calls.append({orig_name: json.dumps(block.input)})
 
     latency = time.time() - t0
-
-    # Extract tool calls from response — restore original dotted names
-    # tool_calls: dicts for inline checker; gorilla_calls: JSON-string args for gorilla export
-    tool_calls = []
-    gorilla_calls = []
-    for block in response.content:
-        if block.type == "tool_use":
-            orig_name = tool_name_map.get(block.name, block.name)
-            tool_calls.append({orig_name: block.input})
-            gorilla_calls.append({orig_name: json.dumps(block.input)})
-
-    # gorilla_calls is the export format: [{func: "{\"arg\": \"val\"}"}, ...]
-    # Stored as a list (not JSON string) — gorilla's decode_ast iterates over it directly
 
     # Correctness check using gorilla's ast_checker
     correct = False
