@@ -814,7 +814,16 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         filtered_tools.append(tool)
                         filtered_names.add(tool["name"])
 
-            turn_system = system_prompt
+            # Enable prompt caching on system prompt and tools
+            # System prompt: cache the static instruction block
+            turn_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+
+            # Tools: cache the last tool definition (covers entire tools block)
+            if filtered_tools:
+                # Remove stale cache markers, add to last tool
+                for t in filtered_tools:
+                    t.pop("cache_control", None)
+                filtered_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
             messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
 
@@ -824,6 +833,17 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
             step = 0
 
             while step < MAX_STEPS_PER_TURN:
+                # Cache last two user messages to avoid re-processing growing context
+                _user_count = 0
+                for _m in reversed(messages):
+                    if _m["role"] == "user" and isinstance(_m["content"], list):
+                        if _user_count < 2:
+                            _m["content"][-1]["cache_control"] = {"type": "ephemeral"}
+                        else:
+                            for _c in _m["content"]:
+                                _c.pop("cache_control", None)
+                        _user_count += 1
+
                 try:
                     response = client.messages.create(
                         model=MODEL, temperature=0.0, max_tokens=4096,
@@ -1091,6 +1111,7 @@ WS_TOOLS = [
             },
             "required": ["url"],
         },
+        "cache_control": {"type": "ephemeral"},  # Cache tools block
     },
 ]
 
@@ -1121,14 +1142,33 @@ def _run_ws_entry(idx: int, entry: dict, gt_entry: dict, client: anthropic.Anthr
     runner = WebSearchRunner(show_snippet=show_snippet)
     token_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
     messages = [{"role": "user", "content": question}]
+    ws_system = [{"type": "text", "text": WS_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
     final_text = ""
     t0 = time.time()
 
     for step in range(MAX_WS_STEPS):
+        # Cache last two user messages for growing conversation
+        _user_count = 0
+        for _m in reversed(messages):
+            if _m["role"] == "user":
+                if isinstance(_m["content"], list) and _m["content"]:
+                    if _user_count < 2:
+                        _m["content"][-1]["cache_control"] = {"type": "ephemeral"}
+                    else:
+                        for _c in _m["content"]:
+                            if isinstance(_c, dict):
+                                _c.pop("cache_control", None)
+                elif isinstance(_m["content"], str):
+                    # Convert string content to list format for cache_control
+                    _m["content"] = [{"type": "text", "text": _m["content"]}]
+                    if _user_count < 2:
+                        _m["content"][-1]["cache_control"] = {"type": "ephemeral"}
+                _user_count += 1
+
         try:
             response = client.messages.create(
                 model=MODEL, temperature=0.0, max_tokens=4096,
-                system=WS_SYSTEM_PROMPT, tools=WS_TOOLS, messages=messages,
+                system=ws_system, tools=WS_TOOLS, messages=messages,
             )
         except Exception as e:
             safe_print(f"    API error ({entry_id}): {e}")
@@ -1512,26 +1552,34 @@ def main():
         results = run_routing_categories(routing_cats, hybrid=not args.no_hybrid,
                                          workers=args.workers)
         all_results.extend(results)
+        print(f"\n  >> Flushing routing results to disk...")
+        export_all_results(all_results)
 
     # 2. Multi-Turn (LLM execution loop)
     if "multi_turn" in sections:
         results = run_multi_turn_categories(V4_MULTI_TURN_CATS, workers=args.mt_workers)
         all_results.extend(results)
+        print(f"\n  >> Flushing multi-turn results to disk...")
+        export_all_results(all_results)
 
     # 3. Memory (pure HDC)
     if "memory" in sections:
         results = run_memory_categories(V4_MEMORY_CATS)
         all_results.extend(results)
+        print(f"\n  >> Flushing memory results to disk...")
+        export_all_results(all_results)
 
     # 4. Web Search (LLM + SerpAPI)
     if "web_search" in sections:
         results = run_web_search_categories(workers=args.ws_workers)
         all_results.extend(results)
+        print(f"\n  >> Flushing web search results to disk...")
+        export_all_results(all_results)
 
     total_time = time.time() - t_start
     print(f"\n\nTotal evaluation time: {total_time:.0f}s ({total_time/60:.1f}m)")
 
-    # Report & export
+    # Final report & export
     print_final_report(all_results)
     export_all_results(all_results)
 
