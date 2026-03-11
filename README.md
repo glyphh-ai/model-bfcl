@@ -132,13 +132,13 @@ The gap between internal routing accuracy (92.7%) and gorilla-verified scores (7
 
 ### Leaderboard position analysis
 
-As of 2026-03-11, Glyphh Ada 1.1 would rank **#3** on the BFCL V4 leaderboard.
+As of 2026-03-11, Glyphh Ada 1.1 would rank **#2** on the BFCL V4 leaderboard.
 
 | Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
 |------|-------|---------|------|------------|----------|---------|---------|
 | 1 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
-| 2 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
-| **3** | **Glyphh Ada 1.1 (HDC+FC)** | **74.47%** | **$19.23** | **53.62%** | **88.71%** | **83.30%** | **19.28s** |
+| **2** | **Glyphh Ada 1.1 (HDC+FC)** | **74.47%** | **$19.23** | **53.62%** | **88.71%** | **83.30%** | **19.28s** |
+| 3 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
 | 4 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
 | 5 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
 | 6 | Grok 4.1 Fast (FC) | 69.57% | $17.26 | 58.87% | 88.27% | 68.24% | 6.74s |
