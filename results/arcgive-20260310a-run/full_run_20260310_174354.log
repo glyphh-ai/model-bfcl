@@ -1,0 +1,1531 @@
+BFCL V4 Full Evaluation
+Model: claude-haiku-4-5-20251001
+Sections: ['non_live', 'hallucination', 'live', 'multi_turn', 'memory', 'web_search']
+Routing workers: 5
+Multi-turn workers: 3
+Web search workers: 5
+
+── simple (workers=5) ──
+  simple: 50/400 done, 49 correct, 47s
+  simple: 100/400 done, 95 correct, 84s
+  simple: 150/400 done, 140 correct, 122s
+  simple: 200/400 done, 185 correct, 163s
+  simple: 250/400 done, 233 correct, 194s
+  simple: 300/400 done, 281 correct, 223s
+  simple: 350/400 done, 331 correct, 258s
+  simple: 400/400 done, 378 correct, 293s
+  simple: 378/400 (94.5%) in 293s
+
+── java (workers=5) ──
+  java: 50/100 done, 41 correct, 44s
+  java: 100/100 done, 76 correct, 82s
+  java: 76/100 (76.0%) in 82s
+
+── javascript (workers=5) ──
+  javascript: 50/50 done, 36 correct, 43s
+  javascript: 36/50 (72.0%) in 43s
+
+── multiple (workers=5) ──
+  multiple: 50/200 done, 49 correct, 41s
+  multiple: 100/200 done, 95 correct, 80s
+  multiple: 150/200 done, 142 correct, 125s
+  multiple: 200/200 done, 189 correct, 167s
+  multiple: 189/200 (94.5%) in 167s
+
+── parallel (workers=5) ──
+  parallel: 50/200 done, 44 correct, 43s
+  parallel: 100/200 done, 91 correct, 86s
+  parallel: 150/200 done, 136 correct, 130s
+  parallel: 200/200 done, 183 correct, 177s
+  parallel: 183/200 (91.5%) in 177s
+
+── parallel_multiple (workers=5) ──
+  parallel_multiple: 50/200 done, 44 correct, 42s
+  parallel_multiple: 100/200 done, 84 correct, 99s
+  parallel_multiple: 150/200 done, 130 correct, 159s
+  parallel_multiple: 200/200 done, 176 correct, 223s
+  parallel_multiple: 176/200 (88.0%) in 223s
+
+── irrelevance (workers=5) ──
+  irrelevance: 50/240 done, 38 correct, 58s
+  irrelevance: 100/240 done, 80 correct, 115s
+  irrelevance: 150/240 done, 123 correct, 171s
+  irrelevance: 200/240 done, 169 correct, 226s
+  irrelevance: 240/240 done, 205 correct, 268s
+  irrelevance: 205/240 (85.4%) in 268s
+
+── live_irrelevance (workers=5) ──
+  live_irrelevance: 50/884 done, 50 correct, 69s
+  live_irrelevance: 100/884 done, 100 correct, 133s
+  live_irrelevance: 150/884 done, 147 correct, 210s
+  live_irrelevance: 200/884 done, 194 correct, 279s
+  live_irrelevance: 250/884 done, 237 correct, 353s
+  live_irrelevance: 300/884 done, 278 correct, 444s
+  live_irrelevance: 350/884 done, 327 correct, 524s
+  live_irrelevance: 400/884 done, 377 correct, 603s
+  live_irrelevance: 450/884 done, 423 correct, 699s
+  live_irrelevance: 500/884 done, 467 correct, 784s
+  live_irrelevance: 550/884 done, 510 correct, 850s
+  live_irrelevance: 600/884 done, 558 correct, 930s
+  live_irrelevance: 650/884 done, 597 correct, 1033s
+  live_irrelevance: 700/884 done, 636 correct, 1129s
+  live_irrelevance: 750/884 done, 676 correct, 1214s
+  live_irrelevance: 800/884 done, 715 correct, 1303s
+  live_irrelevance: 850/884 done, 765 correct, 1377s
+  live_irrelevance: 884/884 done, 793 correct, 1427s
+  live_irrelevance: 793/884 (89.7%) in 1427s
+
+── live_simple (workers=5) ──
+  live_simple: 50/258 done, 43 correct, 46s
+  live_simple: 100/258 done, 85 correct, 81s
+  live_simple: 150/258 done, 127 correct, 123s
+  live_simple: 200/258 done, 171 correct, 163s
+  live_simple: 250/258 done, 213 correct, 201s
+  live_simple: 258/258 done, 217 correct, 207s
+  live_simple: 217/258 (84.1%) in 207s
+
+── live_multiple (workers=5) ──
+  live_multiple: 50/1053 done, 39 correct, 55s
+  live_multiple: 100/1053 done, 80 correct, 109s
+  live_multiple: 150/1053 done, 120 correct, 167s
+  live_multiple: 200/1053 done, 159 correct, 229s
+  live_multiple: 250/1053 done, 195 correct, 281s
+  live_multiple: 300/1053 done, 233 correct, 329s
+  live_multiple: 350/1053 done, 272 correct, 392s
+  live_multiple: 400/1053 done, 316 correct, 439s
+  live_multiple: 450/1053 done, 355 correct, 501s
+  live_multiple: 500/1053 done, 392 correct, 562s
+  live_multiple: 550/1053 done, 432 correct, 615s
+  live_multiple: 600/1053 done, 464 correct, 668s
+  live_multiple: 650/1053 done, 493 correct, 730s
+  live_multiple: 700/1053 done, 528 correct, 796s
+  live_multiple: 750/1053 done, 563 correct, 857s
+  live_multiple: 800/1053 done, 600 correct, 909s
+  live_multiple: 850/1053 done, 637 correct, 960s
+  live_multiple: 900/1053 done, 669 correct, 1019s
+  live_multiple: 950/1053 done, 698 correct, 1068s
+  live_multiple: 1000/1053 done, 727 correct, 1121s
+  live_multiple: 1050/1053 done, 756 correct, 1173s
+  live_multiple: 1053/1053 done, 757 correct, 1174s
+  live_multiple: 757/1053 (71.9%) in 1174s
+
+── live_parallel (workers=5) ──
+  live_parallel: 16/16 done, 12 correct, 16s
+  live_parallel: 12/16 (75.0%) in 16s
+
+── live_parallel_multiple (workers=5) ──
+  live_parallel_multiple: 24/24 done, 18 correct, 28s
+  live_parallel_multiple: 18/24 (75.0%) in 28s
+
+  >> Flushing routing results to disk...
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_python_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_java_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_javascript_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_simple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_multiple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_multiple_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/
+
+── multi_turn_base ──
+  [1/200] multi_turn_base_1: PASS  (1 passed, 27s)
+  [2/200] multi_turn_base_0: PASS  (2 passed, 34s)
+  [3/200] multi_turn_base_2: PASS  (3 passed, 39s)
+  [4/200] multi_turn_base_3: PASS  (4 passed, 39s)
+  [5/200] multi_turn_base_4: PASS  (5 passed, 48s)
+  [6/200] multi_turn_base_7: PASS  (6 passed, 65s)
+  [7/200] multi_turn_base_6: PASS  (7 passed, 67s)
+  [8/200] multi_turn_base_5: PASS  (8 passed, 68s)
+  [9/200] multi_turn_base_8: FAIL  (8 passed, 82s)
+  [10/200] multi_turn_base_11: PASS  (9 passed, 91s)
+  [11/200] multi_turn_base_9: PASS  (10 passed, 93s)
+  [12/200] multi_turn_base_13: FAIL  (10 passed, 106s)
+  [13/200] multi_turn_base_10: PASS  (11 passed, 110s)
+  [14/200] multi_turn_base_12: PASS  (12 passed, 110s)
+  [15/200] multi_turn_base_14: PASS  (13 passed, 125s)
+  [16/200] multi_turn_base_15: PASS  (14 passed, 135s)
+  [17/200] multi_turn_base_16: PASS  (15 passed, 137s)
+  [18/200] multi_turn_base_17: PASS  (16 passed, 148s)
+  [19/200] multi_turn_base_19: PASS  (17 passed, 152s)
+  [20/200] multi_turn_base_18: FAIL  (17 passed, 155s)
+  [21/200] multi_turn_base_20: PASS  (18 passed, 165s)
+  [22/200] multi_turn_base_21: FAIL  (18 passed, 167s)
+  [23/200] multi_turn_base_22: FAIL  (18 passed, 174s)
+  [24/200] multi_turn_base_23: FAIL  (18 passed, 177s)
+  [25/200] multi_turn_base_26: PASS  (19 passed, 189s)
+  [26/200] multi_turn_base_25: FAIL  (19 passed, 190s)
+  [27/200] multi_turn_base_24: PASS  (20 passed, 200s)
+  [28/200] multi_turn_base_28: PASS  (21 passed, 209s)
+  [29/200] multi_turn_base_27: PASS  (22 passed, 209s)
+  [30/200] multi_turn_base_29: PASS  (23 passed, 211s)
+  [31/200] multi_turn_base_30: FAIL  (23 passed, 227s)
+  [32/200] multi_turn_base_32: PASS  (24 passed, 232s)
+  [33/200] multi_turn_base_31: FAIL  (24 passed, 246s)
+  [34/200] multi_turn_base_33: PASS  (25 passed, 249s)
+  [35/200] multi_turn_base_34: PASS  (26 passed, 249s)
+  [36/200] multi_turn_base_35: PASS  (27 passed, 270s)
+  [37/200] multi_turn_base_37: PASS  (28 passed, 272s)
+  [38/200] multi_turn_base_36: PASS  (29 passed, 276s)
+  [39/200] multi_turn_base_38: PASS  (30 passed, 290s)
+  [40/200] multi_turn_base_39: PASS  (31 passed, 293s)
+  [41/200] multi_turn_base_40: PASS  (32 passed, 295s)
+  [42/200] multi_turn_base_41: FAIL  (32 passed, 302s)
+  [43/200] multi_turn_base_43: FAIL  (32 passed, 311s)
+  [44/200] multi_turn_base_42: PASS  (33 passed, 313s)
+  [45/200] multi_turn_base_44: PASS  (34 passed, 319s)
+  [46/200] multi_turn_base_45: PASS  (35 passed, 322s)
+  [47/200] multi_turn_base_46: PASS  (36 passed, 327s)
+  [48/200] multi_turn_base_47: FAIL  (36 passed, 331s)
+  [49/200] multi_turn_base_50: PASS  (37 passed, 336s)
+  [50/200] multi_turn_base_48: FAIL  (37 passed, 338s)
+  [51/200] multi_turn_base_49: PASS  (38 passed, 343s)
+  [52/200] multi_turn_base_51: PASS  (39 passed, 364s)
+  [53/200] multi_turn_base_53: PASS  (40 passed, 367s)
+  [54/200] multi_turn_base_52: PASS  (41 passed, 370s)
+  [55/200] multi_turn_base_54: FAIL  (41 passed, 384s)
+  [56/200] multi_turn_base_55: FAIL  (41 passed, 395s)
+  [57/200] multi_turn_base_56: PASS  (42 passed, 395s)
+  [58/200] multi_turn_base_57: PASS  (43 passed, 398s)
+  [59/200] multi_turn_base_58: FAIL  (43 passed, 412s)
+  [60/200] multi_turn_base_60: FAIL  (43 passed, 421s)
+  [61/200] multi_turn_base_59: PASS  (44 passed, 431s)
+  [62/200] multi_turn_base_62: FAIL  (44 passed, 437s)
+  [63/200] multi_turn_base_61: PASS  (45 passed, 445s)
+  [64/200] multi_turn_base_63: PASS  (46 passed, 453s)
+  [65/200] multi_turn_base_64: PASS  (47 passed, 455s)
+  [66/200] multi_turn_base_65: PASS  (48 passed, 473s)
+  [67/200] multi_turn_base_66: PASS  (49 passed, 481s)
+  [68/200] multi_turn_base_67: PASS  (50 passed, 488s)
+  [69/200] multi_turn_base_68: FAIL  (50 passed, 500s)
+  [70/200] multi_turn_base_69: PASS  (51 passed, 501s)
+  [71/200] multi_turn_base_70: FAIL  (51 passed, 511s)
+  [72/200] multi_turn_base_72: PASS  (52 passed, 534s)
+  [73/200] multi_turn_base_73: PASS  (53 passed, 535s)
+  [74/200] multi_turn_base_71: PASS  (54 passed, 537s)
+  [75/200] multi_turn_base_76: PASS  (55 passed, 555s)
+  [76/200] multi_turn_base_74: PASS  (56 passed, 557s)
+  [77/200] multi_turn_base_75: FAIL  (56 passed, 562s)
+  [78/200] multi_turn_base_78: FAIL  (56 passed, 567s)
+  [79/200] multi_turn_base_77: PASS  (57 passed, 570s)
+  [80/200] multi_turn_base_79: PASS  (58 passed, 581s)
+  [81/200] multi_turn_base_80: PASS  (59 passed, 601s)
+  [82/200] multi_turn_base_81: FAIL  (59 passed, 601s)
+  [83/200] multi_turn_base_82: PASS  (60 passed, 611s)
+  [84/200] multi_turn_base_84: PASS  (61 passed, 619s)
+  [85/200] multi_turn_base_83: PASS  (62 passed, 622s)
+  [86/200] multi_turn_base_85: PASS  (63 passed, 632s)
+  [87/200] multi_turn_base_86: PASS  (64 passed, 641s)
+  [88/200] multi_turn_base_87: PASS  (65 passed, 648s)
+  [89/200] multi_turn_base_88: PASS  (66 passed, 653s)
+  [90/200] multi_turn_base_91: FAIL  (66 passed, 666s)
+  [91/200] multi_turn_base_89: PASS  (67 passed, 672s)
+  [92/200] multi_turn_base_90: PASS  (68 passed, 683s)
+  [93/200] multi_turn_base_93: FAIL  (68 passed, 688s)
+  [94/200] multi_turn_base_92: FAIL  (68 passed, 698s)
+  [95/200] multi_turn_base_94: PASS  (69 passed, 707s)
+  [96/200] multi_turn_base_95: PASS  (70 passed, 719s)
+  [97/200] multi_turn_base_96: PASS  (71 passed, 720s)
+  [98/200] multi_turn_base_98: PASS  (72 passed, 742s)
+  [99/200] multi_turn_base_99: FAIL  (72 passed, 744s)
+  [100/200] multi_turn_base_97: PASS  (73 passed, 752s)
+  [101/200] multi_turn_base_100: PASS  (74 passed, 753s)
+  [102/200] multi_turn_base_101: PASS  (75 passed, 757s)
+  [103/200] multi_turn_base_104: PASS  (76 passed, 769s)
+  [104/200] multi_turn_base_102: PASS  (77 passed, 775s)
+  [105/200] multi_turn_base_105: PASS  (78 passed, 782s)
+  [106/200] multi_turn_base_103: PASS  (79 passed, 783s)
+  [107/200] multi_turn_base_106: FAIL  (79 passed, 799s)
+  [108/200] multi_turn_base_107: PASS  (80 passed, 804s)
+  [109/200] multi_turn_base_108: PASS  (81 passed, 808s)
+  [110/200] multi_turn_base_109: FAIL  (81 passed, 829s)
+  [111/200] multi_turn_base_111: PASS  (82 passed, 830s)
+  [112/200] multi_turn_base_110: FAIL  (82 passed, 832s)
+  [113/200] multi_turn_base_113: PASS  (83 passed, 844s)
+  [114/200] multi_turn_base_112: PASS  (84 passed, 852s)
+  [115/200] multi_turn_base_114: PASS  (85 passed, 853s)
+  [116/200] multi_turn_base_115: PASS  (86 passed, 863s)
+  [117/200] multi_turn_base_116: PASS  (87 passed, 881s)
+  [118/200] multi_turn_base_118: FAIL  (87 passed, 881s)
+  [119/200] multi_turn_base_117: FAIL  (87 passed, 889s)
+  [120/200] multi_turn_base_120: PASS  (88 passed, 898s)
+  [121/200] multi_turn_base_119: PASS  (89 passed, 900s)
+  [122/200] multi_turn_base_121: FAIL  (89 passed, 908s)
+  [123/200] multi_turn_base_123: PASS  (90 passed, 918s)
+  [124/200] multi_turn_base_122: PASS  (91 passed, 921s)
+  [125/200] multi_turn_base_124: FAIL  (91 passed, 926s)
+  [126/200] multi_turn_base_126: FAIL  (91 passed, 939s)
+  [127/200] multi_turn_base_127: PASS  (92 passed, 945s)
+  [128/200] multi_turn_base_125: FAIL  (92 passed, 949s)
+  [129/200] multi_turn_base_128: PASS  (93 passed, 958s)
+  [130/200] multi_turn_base_129: FAIL  (93 passed, 968s)
+  [131/200] multi_turn_base_130: PASS  (94 passed, 970s)
+  [132/200] multi_turn_base_133: FAIL  (94 passed, 978s)
+  [133/200] multi_turn_base_132: PASS  (95 passed, 981s)
+  [134/200] multi_turn_base_131: PASS  (96 passed, 989s)
+  [135/200] multi_turn_base_134: FAIL  (96 passed, 997s)
+  [136/200] multi_turn_base_135: PASS  (97 passed, 1001s)
+  [137/200] multi_turn_base_136: PASS  (98 passed, 1010s)
+  [138/200] multi_turn_base_137: PASS  (99 passed, 1016s)
+  [139/200] multi_turn_base_139: PASS  (100 passed, 1020s)
+  [140/200] multi_turn_base_138: PASS  (101 passed, 1032s)
+  [141/200] multi_turn_base_140: FAIL  (101 passed, 1036s)
+  [142/200] multi_turn_base_141: PASS  (102 passed, 1049s)
+  [143/200] multi_turn_base_142: PASS  (103 passed, 1053s)
+  [144/200] multi_turn_base_143: PASS  (104 passed, 1056s)
+  [145/200] multi_turn_base_144: PASS  (105 passed, 1059s)
+  [146/200] multi_turn_base_147: FAIL  (105 passed, 1070s)
+  [147/200] multi_turn_base_146: PASS  (106 passed, 1074s)
+  [148/200] multi_turn_base_145: PASS  (107 passed, 1079s)
+  [149/200] multi_turn_base_150: PASS  (108 passed, 1093s)
+  [150/200] multi_turn_base_149: FAIL  (108 passed, 1094s)
+  [151/200] multi_turn_base_148: FAIL  (108 passed, 1100s)
+  [152/200] multi_turn_base_152: FAIL  (108 passed, 1110s)
+  [153/200] multi_turn_base_151: PASS  (109 passed, 1113s)
+  [154/200] multi_turn_base_153: FAIL  (109 passed, 1120s)
+  [155/200] multi_turn_base_155: FAIL  (109 passed, 1122s)
+  [156/200] multi_turn_base_154: FAIL  (109 passed, 1135s)
+  [157/200] multi_turn_base_157: PASS  (110 passed, 1137s)
+  [158/200] multi_turn_base_156: FAIL  (110 passed, 1143s)
+  [159/200] multi_turn_base_159: FAIL  (110 passed, 1149s)
+  [160/200] multi_turn_base_158: PASS  (111 passed, 1152s)
+  [161/200] multi_turn_base_160: FAIL  (111 passed, 1157s)
+  [162/200] multi_turn_base_161: PASS  (112 passed, 1162s)
+  [163/200] multi_turn_base_163: PASS  (113 passed, 1171s)
+  [164/200] multi_turn_base_162: FAIL  (113 passed, 1177s)
+  [165/200] multi_turn_base_164: FAIL  (113 passed, 1182s)
+  [166/200] multi_turn_base_165: PASS  (114 passed, 1199s)
+  [167/200] multi_turn_base_166: PASS  (115 passed, 1201s)
+  [168/200] multi_turn_base_167: PASS  (116 passed, 1208s)
+  [169/200] multi_turn_base_169: FAIL  (116 passed, 1214s)
+  [170/200] multi_turn_base_168: FAIL  (116 passed, 1225s)
+  [171/200] multi_turn_base_171: FAIL  (116 passed, 1238s)
+  [172/200] multi_turn_base_170: FAIL  (116 passed, 1240s)
+  [173/200] multi_turn_base_172: FAIL  (116 passed, 1247s)
+  [174/200] multi_turn_base_173: FAIL  (116 passed, 1253s)
+  [175/200] multi_turn_base_175: FAIL  (116 passed, 1260s)
+  [176/200] multi_turn_base_176: PASS  (117 passed, 1264s)
+  [177/200] multi_turn_base_177: FAIL  (117 passed, 1276s)
+  [178/200] multi_turn_base_174: PASS  (118 passed, 1279s)
+  [179/200] multi_turn_base_178: PASS  (119 passed, 1296s)
+  [180/200] multi_turn_base_179: PASS  (120 passed, 1298s)
+  [181/200] multi_turn_base_182: PASS  (121 passed, 1310s)
+  [182/200] multi_turn_base_180: PASS  (122 passed, 1315s)
+  [183/200] multi_turn_base_181: FAIL  (122 passed, 1315s)
+  [184/200] multi_turn_base_183: FAIL  (122 passed, 1330s)
+  [185/200] multi_turn_base_185: FAIL  (122 passed, 1331s)
+  [186/200] multi_turn_base_184: PASS  (123 passed, 1346s)
+  [187/200] multi_turn_base_187: FAIL  (123 passed, 1349s)
+  [188/200] multi_turn_base_186: FAIL  (123 passed, 1361s)
+  [189/200] multi_turn_base_189: FAIL  (123 passed, 1369s)
+  [190/200] multi_turn_base_188: FAIL  (123 passed, 1375s)
+  [191/200] multi_turn_base_190: FAIL  (123 passed, 1388s)
+  [192/200] multi_turn_base_191: PASS  (124 passed, 1397s)
+  [193/200] multi_turn_base_192: PASS  (125 passed, 1400s)
+  [194/200] multi_turn_base_193: FAIL  (125 passed, 1408s)
+  [195/200] multi_turn_base_195: PASS  (126 passed, 1422s)
+  [196/200] multi_turn_base_194: FAIL  (126 passed, 1429s)
+  [197/200] multi_turn_base_196: FAIL  (126 passed, 1436s)
+  [198/200] multi_turn_base_198: FAIL  (126 passed, 1439s)
+  [199/200] multi_turn_base_197: PASS  (127 passed, 1441s)
+  [200/200] multi_turn_base_199: FAIL  (127 passed, 1454s)
+  multi_turn_base: 127/200 (63.5%) in 1454s
+
+── multi_turn_miss_func ──
+  [1/200] multi_turn_miss_func_1: FAIL  (0 passed, 37s)
+  [2/200] multi_turn_miss_func_2: FAIL  (0 passed, 44s)
+  [3/200] multi_turn_miss_func_0: FAIL  (0 passed, 44s)
+  [4/200] multi_turn_miss_func_4: PASS  (1 passed, 63s)
+  [5/200] multi_turn_miss_func_3: PASS  (2 passed, 72s)
+  [6/200] multi_turn_miss_func_5: PASS  (3 passed, 75s)
+  [7/200] multi_turn_miss_func_7: FAIL  (3 passed, 93s)
+  [8/200] multi_turn_miss_func_8: FAIL  (3 passed, 93s)
+  [9/200] multi_turn_miss_func_6: PASS  (4 passed, 104s)
+  [10/200] multi_turn_miss_func_11: PASS  (5 passed, 117s)
+  [11/200] multi_turn_miss_func_9: FAIL  (5 passed, 130s)
+  [12/200] multi_turn_miss_func_12: FAIL  (5 passed, 141s)
+  [13/200] multi_turn_miss_func_10: PASS  (6 passed, 143s)
+  [14/200] multi_turn_miss_func_13: FAIL  (6 passed, 143s)
+  [15/200] multi_turn_miss_func_14: PASS  (7 passed, 168s)
+  [16/200] multi_turn_miss_func_16: FAIL  (7 passed, 174s)
+  [17/200] multi_turn_miss_func_15: PASS  (8 passed, 186s)
+  [18/200] multi_turn_miss_func_17: PASS  (9 passed, 193s)
+  [19/200] multi_turn_miss_func_18: FAIL  (9 passed, 198s)
+  [20/200] multi_turn_miss_func_19: FAIL  (9 passed, 207s)
+  [21/200] multi_turn_miss_func_20: FAIL  (9 passed, 219s)
+  [22/200] multi_turn_miss_func_21: FAIL  (9 passed, 225s)
+  [23/200] multi_turn_miss_func_23: FAIL  (9 passed, 233s)
+  [24/200] multi_turn_miss_func_22: FAIL  (9 passed, 235s)
+  [25/200] multi_turn_miss_func_25: FAIL  (9 passed, 254s)
+  [26/200] multi_turn_miss_func_24: FAIL  (9 passed, 260s)
+  [27/200] multi_turn_miss_func_26: FAIL  (9 passed, 263s)
+  [28/200] multi_turn_miss_func_29: PASS  (10 passed, 278s)
+  [29/200] multi_turn_miss_func_27: PASS  (11 passed, 281s)
+  [30/200] multi_turn_miss_func_28: PASS  (12 passed, 282s)
+  [31/200] multi_turn_miss_func_30: FAIL  (12 passed, 294s)
+  [32/200] multi_turn_miss_func_32: PASS  (13 passed, 302s)
+  [33/200] multi_turn_miss_func_31: FAIL  (13 passed, 306s)
+  [34/200] multi_turn_miss_func_33: FAIL  (13 passed, 319s)
+  [35/200] multi_turn_miss_func_34: PASS  (14 passed, 325s)
+  [36/200] multi_turn_miss_func_35: PASS  (15 passed, 336s)
+  [37/200] multi_turn_miss_func_36: FAIL  (15 passed, 344s)
+  [38/200] multi_turn_miss_func_38: FAIL  (15 passed, 349s)
+  [39/200] multi_turn_miss_func_37: PASS  (16 passed, 354s)
+  [40/200] multi_turn_miss_func_41: PASS  (17 passed, 372s)
+  [41/200] multi_turn_miss_func_40: PASS  (18 passed, 374s)
+  [42/200] multi_turn_miss_func_39: FAIL  (18 passed, 378s)
+  [43/200] multi_turn_miss_func_42: PASS  (19 passed, 398s)
+  [44/200] multi_turn_miss_func_43: FAIL  (19 passed, 398s)
+  [45/200] multi_turn_miss_func_44: PASS  (20 passed, 408s)
+  [46/200] multi_turn_miss_func_46: PASS  (21 passed, 415s)
+  [47/200] multi_turn_miss_func_45: PASS  (22 passed, 427s)
+  [48/200] multi_turn_miss_func_47: FAIL  (22 passed, 430s)
+  [49/200] multi_turn_miss_func_48: FAIL  (22 passed, 433s)
+  [50/200] multi_turn_miss_func_50: PASS  (23 passed, 439s)
+  [51/200] multi_turn_miss_func_49: FAIL  (23 passed, 448s)
+  [52/200] multi_turn_miss_func_51: PASS  (24 passed, 465s)
+  [53/200] multi_turn_miss_func_52: FAIL  (24 passed, 466s)
+  [54/200] multi_turn_miss_func_53: FAIL  (24 passed, 472s)
+  [55/200] multi_turn_miss_func_54: FAIL  (24 passed, 489s)
+  [56/200] multi_turn_miss_func_55: FAIL  (24 passed, 496s)
+  [57/200] multi_turn_miss_func_56: PASS  (25 passed, 499s)
+  [58/200] multi_turn_miss_func_57: PASS  (26 passed, 505s)
+  [59/200] multi_turn_miss_func_58: FAIL  (26 passed, 514s)
+  [60/200] multi_turn_miss_func_59: PASS  (27 passed, 536s)
+  [61/200] multi_turn_miss_func_60: FAIL  (27 passed, 536s)
+  [62/200] multi_turn_miss_func_61: PASS  (28 passed, 554s)
+  [63/200] multi_turn_miss_func_63: FAIL  (28 passed, 568s)
+  [64/200] multi_turn_miss_func_62: PASS  (29 passed, 571s)
+  [65/200] multi_turn_miss_func_64: PASS  (30 passed, 580s)
+  [66/200] multi_turn_miss_func_65: PASS  (31 passed, 601s)
+  [67/200] multi_turn_miss_func_66: PASS  (32 passed, 606s)
+  [68/200] multi_turn_miss_func_67: PASS  (33 passed, 622s)
+  [69/200] multi_turn_miss_func_69: FAIL  (33 passed, 629s)
+  [70/200] multi_turn_miss_func_68: FAIL  (33 passed, 629s)
+  [71/200] multi_turn_miss_func_70: FAIL  (33 passed, 644s)
+  [72/200] multi_turn_miss_func_71: PASS  (34 passed, 664s)
+  [73/200] multi_turn_miss_func_72: PASS  (35 passed, 669s)
+  [74/200] multi_turn_miss_func_73: PASS  (36 passed, 669s)
+  [75/200] multi_turn_miss_func_76: FAIL  (36 passed, 682s)
+  [76/200] multi_turn_miss_func_74: PASS  (37 passed, 692s)
+  [77/200] multi_turn_miss_func_77: FAIL  (37 passed, 698s)
+  [78/200] multi_turn_miss_func_75: FAIL  (37 passed, 703s)
+  [79/200] multi_turn_miss_func_78: FAIL  (37 passed, 705s)
+  [80/200] multi_turn_miss_func_79: PASS  (38 passed, 724s)
+  [81/200] multi_turn_miss_func_81: FAIL  (38 passed, 727s)
+  [82/200] multi_turn_miss_func_80: PASS  (39 passed, 741s)
+  [83/200] multi_turn_miss_func_83: FAIL  (39 passed, 753s)
+  [84/200] multi_turn_miss_func_82: PASS  (40 passed, 757s)
+  [85/200] multi_turn_miss_func_84: PASS  (41 passed, 764s)
+  [86/200] multi_turn_miss_func_86: FAIL  (41 passed, 775s)
+  [87/200] multi_turn_miss_func_85: FAIL  (41 passed, 779s)
+  [88/200] multi_turn_miss_func_87: PASS  (42 passed, 792s)
+  [89/200] multi_turn_miss_func_88: FAIL  (42 passed, 794s)
+  [90/200] multi_turn_miss_func_91: PASS  (43 passed, 809s)
+  [91/200] multi_turn_miss_func_89: PASS  (44 passed, 813s)
+  [92/200] multi_turn_miss_func_90: FAIL  (44 passed, 830s)
+  [93/200] multi_turn_miss_func_93: FAIL  (44 passed, 840s)
+  [94/200] multi_turn_miss_func_92: FAIL  (44 passed, 842s)
+  [95/200] multi_turn_miss_func_94: PASS  (45 passed, 855s)
+  [96/200] multi_turn_miss_func_95: PASS  (46 passed, 867s)
+  [97/200] multi_turn_miss_func_96: PASS  (47 passed, 870s)
+  [98/200] multi_turn_miss_func_98: PASS  (48 passed, 894s)
+  [99/200] multi_turn_miss_func_97: PASS  (49 passed, 904s)
+  [100/200] multi_turn_miss_func_99: FAIL  (49 passed, 906s)
+  [101/200] multi_turn_miss_func_100: PASS  (50 passed, 907s)
+  [102/200] multi_turn_miss_func_101: PASS  (51 passed, 920s)
+  [103/200] multi_turn_miss_func_102: FAIL  (51 passed, 930s)
+  [104/200] multi_turn_miss_func_104: PASS  (52 passed, 934s)
+  [105/200] multi_turn_miss_func_103: FAIL  (52 passed, 937s)
+  [106/200] multi_turn_miss_func_105: PASS  (53 passed, 947s)
+  [107/200] multi_turn_miss_func_106: FAIL  (53 passed, 960s)
+  [108/200] multi_turn_miss_func_107: PASS  (54 passed, 963s)
+  [109/200] multi_turn_miss_func_108: PASS  (55 passed, 978s)
+  [110/200] multi_turn_miss_func_109: FAIL  (55 passed, 993s)
+  [111/200] multi_turn_miss_func_110: FAIL  (55 passed, 993s)
+  [112/200] multi_turn_miss_func_111: PASS  (56 passed, 1006s)
+  [113/200] multi_turn_miss_func_113: PASS  (57 passed, 1009s)
+  [114/200] multi_turn_miss_func_112: PASS  (58 passed, 1021s)
+  [115/200] multi_turn_miss_func_114: PASS  (59 passed, 1031s)
+  [116/200] multi_turn_miss_func_115: PASS  (60 passed, 1033s)
+  [117/200] multi_turn_miss_func_116: PASS  (61 passed, 1048s)
+  [118/200] multi_turn_miss_func_118: FAIL  (61 passed, 1057s)
+  [119/200] multi_turn_miss_func_117: FAIL  (61 passed, 1064s)
+  [120/200] multi_turn_miss_func_119: FAIL  (61 passed, 1068s)
+  [121/200] multi_turn_miss_func_120: FAIL  (61 passed, 1078s)
+  [122/200] multi_turn_miss_func_121: FAIL  (61 passed, 1084s)
+  [123/200] multi_turn_miss_func_122: PASS  (62 passed, 1091s)
+  [124/200] multi_turn_miss_func_123: PASS  (63 passed, 1101s)
+  [125/200] multi_turn_miss_func_124: FAIL  (63 passed, 1103s)
+  [126/200] multi_turn_miss_func_126: FAIL  (63 passed, 1118s)
+  [127/200] multi_turn_miss_func_125: FAIL  (63 passed, 1120s)
+  [128/200] multi_turn_miss_func_127: PASS  (64 passed, 1126s)
+  [129/200] multi_turn_miss_func_128: FAIL  (64 passed, 1137s)
+  [130/200] multi_turn_miss_func_130: PASS  (65 passed, 1148s)
+  [131/200] multi_turn_miss_func_129: FAIL  (65 passed, 1152s)
+  [132/200] multi_turn_miss_func_133: FAIL  (65 passed, 1163s)
+  [133/200] multi_turn_miss_func_132: PASS  (66 passed, 1165s)
+  [134/200] multi_turn_miss_func_131: PASS  (67 passed, 1179s)
+  [135/200] multi_turn_miss_func_134: FAIL  (67 passed, 1184s)
+  [136/200] multi_turn_miss_func_135: FAIL  (67 passed, 1185s)
+  [137/200] multi_turn_miss_func_136: PASS  (68 passed, 1204s)
+  [138/200] multi_turn_miss_func_137: FAIL  (68 passed, 1206s)
+  [139/200] multi_turn_miss_func_139: FAIL  (68 passed, 1214s)
+  [140/200] multi_turn_miss_func_138: PASS  (69 passed, 1218s)
+  [141/200] multi_turn_miss_func_140: FAIL  (69 passed, 1226s)
+  [142/200] multi_turn_miss_func_141: PASS  (70 passed, 1240s)
+  [143/200] multi_turn_miss_func_142: PASS  (71 passed, 1243s)
+  [144/200] multi_turn_miss_func_143: FAIL  (71 passed, 1252s)
+  [145/200] multi_turn_miss_func_144: PASS  (72 passed, 1254s)
+  [146/200] multi_turn_miss_func_145: PASS  (73 passed, 1270s)
+  [147/200] multi_turn_miss_func_146: FAIL  (73 passed, 1271s)
+  [148/200] multi_turn_miss_func_147: PASS  (74 passed, 1272s)
+  [149/200] multi_turn_miss_func_150: PASS  (75 passed, 1289s)
+  [150/200] multi_turn_miss_func_149: FAIL  (75 passed, 1297s)
+  [151/200] multi_turn_miss_func_148: FAIL  (75 passed, 1297s)
+  [152/200] multi_turn_miss_func_151: FAIL  (75 passed, 1306s)
+  [153/200] multi_turn_miss_func_152: FAIL  (75 passed, 1318s)
+  [154/200] multi_turn_miss_func_153: FAIL  (75 passed, 1323s)
+  [155/200] multi_turn_miss_func_155: PASS  (76 passed, 1332s)
+  [156/200] multi_turn_miss_func_154: FAIL  (76 passed, 1335s)
+  [157/200] multi_turn_miss_func_157: PASS  (77 passed, 1349s)
+  [158/200] multi_turn_miss_func_156: FAIL  (77 passed, 1351s)
+  [159/200] multi_turn_miss_func_158: PASS  (78 passed, 1354s)
+  [160/200] multi_turn_miss_func_159: FAIL  (78 passed, 1364s)
+  [161/200] multi_turn_miss_func_160: FAIL  (78 passed, 1368s)
+  [162/200] multi_turn_miss_func_161: FAIL  (78 passed, 1370s)
+  [163/200] multi_turn_miss_func_163: PASS  (79 passed, 1384s)
+  [164/200] multi_turn_miss_func_162: FAIL  (79 passed, 1392s)
+  [165/200] multi_turn_miss_func_164: PASS  (80 passed, 1398s)
+  [166/200] multi_turn_miss_func_165: FAIL  (80 passed, 1406s)
+  [167/200] multi_turn_miss_func_166: FAIL  (80 passed, 1414s)
+  [168/200] multi_turn_miss_func_167: FAIL  (80 passed, 1423s)
+  [169/200] multi_turn_miss_func_169: FAIL  (80 passed, 1431s)
+  [170/200] multi_turn_miss_func_168: FAIL  (80 passed, 1432s)
+  [171/200] multi_turn_miss_func_170: FAIL  (80 passed, 1450s)
+  [172/200] multi_turn_miss_func_172: FAIL  (80 passed, 1458s)
+  [173/200] multi_turn_miss_func_171: FAIL  (80 passed, 1459s)
+  [174/200] multi_turn_miss_func_173: FAIL  (80 passed, 1467s)
+  [175/200] multi_turn_miss_func_176: FAIL  (80 passed, 1480s)
+  [176/200] multi_turn_miss_func_175: FAIL  (80 passed, 1481s)
+  [177/200] multi_turn_miss_func_174: FAIL  (80 passed, 1484s)
+  [178/200] multi_turn_miss_func_177: FAIL  (80 passed, 1492s)
+  [179/200] multi_turn_miss_func_178: FAIL  (80 passed, 1505s)
+  [180/200] multi_turn_miss_func_179: FAIL  (80 passed, 1509s)
+  [181/200] multi_turn_miss_func_180: FAIL  (80 passed, 1520s)
+  [182/200] multi_turn_miss_func_182: PASS  (81 passed, 1521s)
+  [183/200] multi_turn_miss_func_181: FAIL  (81 passed, 1532s)
+  [184/200] multi_turn_miss_func_183: FAIL  (81 passed, 1543s)
+  [185/200] multi_turn_miss_func_185: FAIL  (81 passed, 1549s)
+  [186/200] multi_turn_miss_func_184: FAIL  (81 passed, 1557s)
+  [187/200] multi_turn_miss_func_187: FAIL  (81 passed, 1567s)
+  [188/200] multi_turn_miss_func_186: FAIL  (81 passed, 1570s)
+  [189/200] multi_turn_miss_func_189: FAIL  (81 passed, 1587s)
+  [190/200] multi_turn_miss_func_188: FAIL  (81 passed, 1588s)
+  [191/200] multi_turn_miss_func_190: FAIL  (81 passed, 1593s)
+  [192/200] multi_turn_miss_func_191: FAIL  (81 passed, 1613s)
+  [193/200] multi_turn_miss_func_192: PASS  (82 passed, 1615s)
+  [194/200] multi_turn_miss_func_193: FAIL  (82 passed, 1619s)
+  [195/200] multi_turn_miss_func_195: FAIL  (82 passed, 1634s)
+  [196/200] multi_turn_miss_func_194: FAIL  (82 passed, 1644s)
+  [197/200] multi_turn_miss_func_197: FAIL  (82 passed, 1651s)
+  [198/200] multi_turn_miss_func_198: FAIL  (82 passed, 1655s)
+  [199/200] multi_turn_miss_func_196: FAIL  (82 passed, 1658s)
+  [200/200] multi_turn_miss_func_199: FAIL  (82 passed, 1672s)
+  multi_turn_miss_func: 82/200 (41.0%) in 1672s
+
+── multi_turn_miss_param ──
+  [1/200] multi_turn_miss_param_1: PASS  (1 passed, 30s)
+  [2/200] multi_turn_miss_param_0: PASS  (2 passed, 40s)
+  [3/200] multi_turn_miss_param_3: PASS  (3 passed, 46s)
+  [4/200] multi_turn_miss_param_2: PASS  (4 passed, 47s)
+  [5/200] multi_turn_miss_param_4: PASS  (5 passed, 55s)
+  [6/200] multi_turn_miss_param_5: PASS  (6 passed, 76s)
+  [7/200] multi_turn_miss_param_6: FAIL  (6 passed, 78s)
+  [8/200] multi_turn_miss_param_7: PASS  (7 passed, 80s)
+  [9/200] multi_turn_miss_param_8: FAIL  (7 passed, 101s)
+  [10/200] multi_turn_miss_param_9: FAIL  (7 passed, 105s)
+  [11/200] multi_turn_miss_param_11: FAIL  (7 passed, 113s)
+  [12/200] multi_turn_miss_param_12: PASS  (8 passed, 124s)
+  [13/200] multi_turn_miss_param_10: PASS  (9 passed, 126s)
+  [14/200] multi_turn_miss_param_13: FAIL  (9 passed, 127s)
+  [15/200] multi_turn_miss_param_14: PASS  (10 passed, 148s)
+  [16/200] multi_turn_miss_param_16: PASS  (11 passed, 149s)
+  [17/200] multi_turn_miss_param_15: PASS  (12 passed, 163s)
+  [18/200] multi_turn_miss_param_17: FAIL  (12 passed, 166s)
+  [19/200] multi_turn_miss_param_19: PASS  (13 passed, 180s)
+  [20/200] multi_turn_miss_param_18: FAIL  (13 passed, 187s)
+  [21/200] multi_turn_miss_param_20: FAIL  (13 passed, 188s)
+  [22/200] multi_turn_miss_param_21: FAIL  (13 passed, 196s)
+  [23/200] multi_turn_miss_param_23: FAIL  (13 passed, 203s)
+  [24/200] multi_turn_miss_param_22: FAIL  (13 passed, 211s)
+  [25/200] multi_turn_miss_param_26: PASS  (14 passed, 225s)
+  [26/200] multi_turn_miss_param_25: FAIL  (14 passed, 225s)
+  [27/200] multi_turn_miss_param_24: FAIL  (14 passed, 233s)
+  [28/200] multi_turn_miss_param_29: PASS  (15 passed, 245s)
+  [29/200] multi_turn_miss_param_27: PASS  (16 passed, 250s)
+  [30/200] multi_turn_miss_param_28: FAIL  (16 passed, 253s)
+  [31/200] multi_turn_miss_param_30: PASS  (17 passed, 266s)
+  [32/200] multi_turn_miss_param_32: FAIL  (17 passed, 267s)
+  [33/200] multi_turn_miss_param_31: FAIL  (17 passed, 268s)
+  [34/200] multi_turn_miss_param_33: PASS  (18 passed, 292s)
+  [35/200] multi_turn_miss_param_34: PASS  (19 passed, 293s)
+  [36/200] multi_turn_miss_param_35: FAIL  (19 passed, 298s)
+  [37/200] multi_turn_miss_param_38: PASS  (20 passed, 317s)
+  [38/200] multi_turn_miss_param_37: PASS  (21 passed, 319s)
+  [39/200] multi_turn_miss_param_36: FAIL  (21 passed, 322s)
+  [40/200] multi_turn_miss_param_41: FAIL  (21 passed, 340s)
+  [41/200] multi_turn_miss_param_39: PASS  (22 passed, 342s)
+  [42/200] multi_turn_miss_param_40: PASS  (23 passed, 356s)
+  [43/200] multi_turn_miss_param_43: FAIL  (23 passed, 360s)
+  [44/200] multi_turn_miss_param_42: PASS  (24 passed, 369s)
+  [45/200] multi_turn_miss_param_45: FAIL  (24 passed, 373s)
+  [46/200] multi_turn_miss_param_44: PASS  (25 passed, 379s)
+  [47/200] multi_turn_miss_param_46: PASS  (26 passed, 385s)
+  [48/200] multi_turn_miss_param_47: FAIL  (26 passed, 388s)
+  [49/200] multi_turn_miss_param_50: PASS  (27 passed, 393s)
+  [50/200] multi_turn_miss_param_48: PASS  (28 passed, 400s)
+  [51/200] multi_turn_miss_param_49: PASS  (29 passed, 405s)
+  [52/200] multi_turn_miss_param_51: PASS  (30 passed, 428s)
+  [53/200] multi_turn_miss_param_52: FAIL  (30 passed, 434s)
+  [54/200] multi_turn_miss_param_53: PASS  (31 passed, 437s)
+  [55/200] multi_turn_miss_param_54: FAIL  (31 passed, 452s)
+  [56/200] multi_turn_miss_param_56: PASS  (32 passed, 464s)
+  [57/200] multi_turn_miss_param_55: FAIL  (32 passed, 466s)
+  [58/200] multi_turn_miss_param_57: PASS  (33 passed, 470s)
+  [59/200] multi_turn_miss_param_58: FAIL  (33 passed, 484s)
+  [60/200] multi_turn_miss_param_60: FAIL  (33 passed, 499s)
+  [61/200] multi_turn_miss_param_59: FAIL  (33 passed, 505s)
+  [62/200] multi_turn_miss_param_61: PASS  (34 passed, 518s)
+  [63/200] multi_turn_miss_param_62: FAIL  (34 passed, 525s)
+  [64/200] multi_turn_miss_param_63: PASS  (35 passed, 528s)
+  [65/200] multi_turn_miss_param_65: FAIL  (35 passed, 542s)
+  [66/200] multi_turn_miss_param_64: PASS  (36 passed, 549s)
+  [67/200] multi_turn_miss_param_66: PASS  (37 passed, 552s)
+  [68/200] multi_turn_miss_param_67: PASS  (38 passed, 577s)
+  [69/200] multi_turn_miss_param_68: FAIL  (38 passed, 577s)
+  [70/200] multi_turn_miss_param_69: PASS  (39 passed, 579s)
+  [71/200] multi_turn_miss_param_70: PASS  (40 passed, 607s)
+  [72/200] multi_turn_miss_param_72: FAIL  (40 passed, 612s)
+  [73/200] multi_turn_miss_param_71: PASS  (41 passed, 615s)
+  [74/200] multi_turn_miss_param_73: PASS  (42 passed, 628s)
+  [75/200] multi_turn_miss_param_74: PASS  (43 passed, 638s)
+  [76/200] multi_turn_miss_param_75: FAIL  (43 passed, 642s)
+  [77/200] multi_turn_miss_param_76: FAIL  (43 passed, 646s)
+  [78/200] multi_turn_miss_param_77: FAIL  (43 passed, 654s)
+  [79/200] multi_turn_miss_param_78: FAIL  (43 passed, 657s)
+  [80/200] multi_turn_miss_param_79: PASS  (44 passed, 665s)
+  [81/200] multi_turn_miss_param_81: FAIL  (44 passed, 690s)
+  [82/200] multi_turn_miss_param_80: FAIL  (44 passed, 692s)
+  [83/200] multi_turn_miss_param_82: PASS  (45 passed, 701s)
+  [84/200] multi_turn_miss_param_84: PASS  (46 passed, 710s)
+  [85/200] multi_turn_miss_param_83: PASS  (47 passed, 711s)
+  [86/200] multi_turn_miss_param_85: FAIL  (47 passed, 731s)
+  [87/200] multi_turn_miss_param_86: PASS  (48 passed, 739s)
+  [88/200] multi_turn_miss_param_87: PASS  (49 passed, 745s)
+  [89/200] multi_turn_miss_param_88: FAIL  (49 passed, 751s)
+  [90/200] multi_turn_miss_param_91: PASS  (50 passed, 770s)
+  [91/200] multi_turn_miss_param_89: PASS  (51 passed, 772s)
+  [92/200] multi_turn_miss_param_90: PASS  (52 passed, 788s)
+  [93/200] multi_turn_miss_param_93: FAIL  (52 passed, 792s)
+  [94/200] multi_turn_miss_param_92: FAIL  (52 passed, 806s)
+  [95/200] multi_turn_miss_param_94: PASS  (53 passed, 813s)
+  [96/200] multi_turn_miss_param_95: FAIL  (53 passed, 823s)
+  [97/200] multi_turn_miss_param_96: PASS  (54 passed, 832s)
+  [98/200] multi_turn_miss_param_98: PASS  (55 passed, 849s)
+  [99/200] multi_turn_miss_param_97: PASS  (56 passed, 854s)
+  [100/200] multi_turn_miss_param_99: FAIL  (56 passed, 861s)
+  [101/200] multi_turn_miss_param_100: PASS  (57 passed, 864s)
+  [102/200] multi_turn_miss_param_101: FAIL  (57 passed, 868s)
+  [103/200] multi_turn_miss_param_104: FAIL  (57 passed, 884s)
+  [104/200] multi_turn_miss_param_102: FAIL  (57 passed, 890s)
+  [105/200] multi_turn_miss_param_103: PASS  (58 passed, 892s)
+  [106/200] multi_turn_miss_param_105: PASS  (59 passed, 900s)
+  [107/200] multi_turn_miss_param_106: FAIL  (59 passed, 912s)
+  [108/200] multi_turn_miss_param_107: PASS  (60 passed, 918s)
+  [109/200] multi_turn_miss_param_108: PASS  (61 passed, 928s)
+  [110/200] multi_turn_miss_param_109: FAIL  (61 passed, 941s)
+  [111/200] multi_turn_miss_param_110: FAIL  (61 passed, 950s)
+  [112/200] multi_turn_miss_param_111: PASS  (62 passed, 956s)
+  [113/200] multi_turn_miss_param_113: FAIL  (62 passed, 965s)
+  [114/200] multi_turn_miss_param_112: PASS  (63 passed, 965s)
+  [115/200] multi_turn_miss_param_114: PASS  (64 passed, 983s)
+  [116/200] multi_turn_miss_param_115: FAIL  (64 passed, 989s)
+  [117/200] multi_turn_miss_param_116: PASS  (65 passed, 991s)
+  [118/200] multi_turn_miss_param_117: FAIL  (65 passed, 1015s)
+  [119/200] multi_turn_miss_param_119: PASS  (66 passed, 1017s)
+  [120/200] multi_turn_miss_param_118: FAIL  (66 passed, 1020s)
+  [121/200] multi_turn_miss_param_120: PASS  (67 passed, 1033s)
+  [122/200] multi_turn_miss_param_121: FAIL  (67 passed, 1039s)
+  [123/200] multi_turn_miss_param_122: PASS  (68 passed, 1040s)
+  [124/200] multi_turn_miss_param_123: PASS  (69 passed, 1059s)
+  [125/200] multi_turn_miss_param_124: FAIL  (69 passed, 1060s)
+  [126/200] multi_turn_miss_param_125: FAIL  (69 passed, 1062s)
+  [127/200] multi_turn_miss_param_126: FAIL  (69 passed, 1074s)
+  [128/200] multi_turn_miss_param_127: PASS  (70 passed, 1081s)
+  [129/200] multi_turn_miss_param_128: PASS  (71 passed, 1083s)
+  [130/200] multi_turn_miss_param_129: FAIL  (71 passed, 1093s)
+  [131/200] multi_turn_miss_param_130: PASS  (72 passed, 1103s)
+  [132/200] multi_turn_miss_param_132: PASS  (73 passed, 1108s)
+  [133/200] multi_turn_miss_param_133: FAIL  (73 passed, 1111s)
+  [134/200] multi_turn_miss_param_131: PASS  (74 passed, 1117s)
+  [135/200] multi_turn_miss_param_134: FAIL  (74 passed, 1130s)
+  [136/200] multi_turn_miss_param_135: PASS  (75 passed, 1135s)
+  [137/200] multi_turn_miss_param_136: PASS  (76 passed, 1144s)
+  [138/200] multi_turn_miss_param_137: PASS  (77 passed, 1155s)
+  [139/200] multi_turn_miss_param_139: PASS  (78 passed, 1158s)
+  [140/200] multi_turn_miss_param_138: PASS  (79 passed, 1166s)
+  [141/200] multi_turn_miss_param_140: FAIL  (79 passed, 1171s)
+  [142/200] multi_turn_miss_param_141: PASS  (80 passed, 1186s)
+  [143/200] multi_turn_miss_param_142: PASS  (81 passed, 1189s)
+  [144/200] multi_turn_miss_param_144: FAIL  (81 passed, 1200s)
+  [145/200] multi_turn_miss_param_143: FAIL  (81 passed, 1201s)
+  [146/200] multi_turn_miss_param_145: PASS  (82 passed, 1217s)
+  [147/200] multi_turn_miss_param_146: FAIL  (82 passed, 1217s)
+  [148/200] multi_turn_miss_param_147: PASS  (83 passed, 1218s)
+  [149/200] multi_turn_miss_param_150: PASS  (84 passed, 1235s)
+  [150/200] multi_turn_miss_param_148: FAIL  (84 passed, 1236s)
+  [151/200] multi_turn_miss_param_149: FAIL  (84 passed, 1243s)
+  [152/200] multi_turn_miss_param_152: FAIL  (84 passed, 1256s)
+  [153/200] multi_turn_miss_param_151: PASS  (85 passed, 1261s)
+  [154/200] multi_turn_miss_param_153: PASS  (86 passed, 1272s)
+  [155/200] multi_turn_miss_param_155: FAIL  (86 passed, 1273s)
+  [156/200] multi_turn_miss_param_154: FAIL  (86 passed, 1283s)
+  [157/200] multi_turn_miss_param_157: PASS  (87 passed, 1290s)
+  [158/200] multi_turn_miss_param_156: FAIL  (87 passed, 1297s)
+  [159/200] multi_turn_miss_param_158: PASS  (88 passed, 1302s)
+  [160/200] multi_turn_miss_param_159: FAIL  (88 passed, 1310s)
+  [161/200] multi_turn_miss_param_160: FAIL  (88 passed, 1316s)
+  [162/200] multi_turn_miss_param_161: PASS  (89 passed, 1320s)
+  [163/200] multi_turn_miss_param_163: PASS  (90 passed, 1330s)
+  [164/200] multi_turn_miss_param_162: FAIL  (90 passed, 1342s)
+  [165/200] multi_turn_miss_param_164: FAIL  (90 passed, 1346s)
+  [166/200] multi_turn_miss_param_165: PASS  (91 passed, 1359s)
+  [167/200] multi_turn_miss_param_166: FAIL  (91 passed, 1362s)
+  [168/200] multi_turn_miss_param_167: PASS  (92 passed, 1380s)
+  [169/200] multi_turn_miss_param_169: FAIL  (92 passed, 1381s)
+  [170/200] multi_turn_miss_param_168: FAIL  (92 passed, 1385s)
+  [171/200] multi_turn_miss_param_170: FAIL  (92 passed, 1404s)
+  [172/200] multi_turn_miss_param_171: FAIL  (92 passed, 1405s)
+  [173/200] multi_turn_miss_param_172: PASS  (93 passed, 1407s)
+  [174/200] multi_turn_miss_param_173: FAIL  (93 passed, 1424s)
+  [175/200] multi_turn_miss_param_175: FAIL  (93 passed, 1427s)
+  [176/200] multi_turn_miss_param_176: FAIL  (93 passed, 1435s)
+  [177/200] multi_turn_miss_param_177: FAIL  (93 passed, 1439s)
+  [178/200] multi_turn_miss_param_174: PASS  (94 passed, 1445s)
+  [179/200] multi_turn_miss_param_179: PASS  (95 passed, 1466s)
+  [180/200] multi_turn_miss_param_178: PASS  (96 passed, 1471s)
+  [181/200] multi_turn_miss_param_182: PASS  (97 passed, 1483s)
+  [182/200] multi_turn_miss_param_180: PASS  (98 passed, 1491s)
+  [183/200] multi_turn_miss_param_181: FAIL  (98 passed, 1492s)
+  [184/200] multi_turn_miss_param_183: FAIL  (98 passed, 1503s)
+  [185/200] multi_turn_miss_param_185: FAIL  (98 passed, 1509s)
+  [186/200] multi_turn_miss_param_184: PASS  (99 passed, 1523s)
+  [187/200] multi_turn_miss_param_187: FAIL  (99 passed, 1526s)
+  [188/200] multi_turn_miss_param_186: FAIL  (99 passed, 1547s)
+  [189/200] multi_turn_miss_param_189: FAIL  (99 passed, 1549s)
+  [190/200] multi_turn_miss_param_188: FAIL  (99 passed, 1550s)
+  [191/200] multi_turn_miss_param_190: FAIL  (99 passed, 1576s)
+  [192/200] multi_turn_miss_param_191: PASS  (100 passed, 1578s)
+  [193/200] multi_turn_miss_param_192: PASS  (101 passed, 1578s)
+  [194/200] multi_turn_miss_param_193: FAIL  (101 passed, 1601s)
+  [195/200] multi_turn_miss_param_195: FAIL  (101 passed, 1601s)
+  [196/200] multi_turn_miss_param_194: FAIL  (101 passed, 1609s)
+  [197/200] multi_turn_miss_param_197: FAIL  (101 passed, 1614s)
+  [198/200] multi_turn_miss_param_198: FAIL  (101 passed, 1628s)
+  [199/200] multi_turn_miss_param_196: FAIL  (101 passed, 1633s)
+  [200/200] multi_turn_miss_param_199: FAIL  (101 passed, 1644s)
+  multi_turn_miss_param: 101/200 (50.5%) in 1644s
+
+── multi_turn_long_context ──
+  [1/200] multi_turn_long_context_1: PASS  (1 passed, 24s)
+  [2/200] multi_turn_long_context_0: PASS  (2 passed, 34s)
+  [3/200] multi_turn_long_context_3: PASS  (3 passed, 36s)
+  [4/200] multi_turn_long_context_4: PASS  (4 passed, 48s)
+  [5/200] multi_turn_long_context_2: PASS  (5 passed, 50s)
+  [6/200] multi_turn_long_context_5: PASS  (6 passed, 62s)
+  [7/200] multi_turn_long_context_7: PASS  (7 passed, 68s)
+  [8/200] multi_turn_long_context_6: PASS  (8 passed, 77s)
+  [9/200] multi_turn_long_context_8: FAIL  (8 passed, 80s)
+  [10/200] multi_turn_long_context_11: PASS  (9 passed, 89s)
+  [11/200] multi_turn_long_context_9: PASS  (10 passed, 92s)
+  [12/200] multi_turn_long_context_13: FAIL  (10 passed, 105s)
+  [13/200] multi_turn_long_context_12: PASS  (11 passed, 107s)
+  [14/200] multi_turn_long_context_10: PASS  (12 passed, 117s)
+  [15/200] multi_turn_long_context_14: PASS  (13 passed, 125s)
+  [16/200] multi_turn_long_context_15: PASS  (14 passed, 130s)
+  [17/200] multi_turn_long_context_16: PASS  (15 passed, 142s)
+  [18/200] multi_turn_long_context_17: PASS  (16 passed, 148s)
+  [19/200] multi_turn_long_context_18: FAIL  (16 passed, 151s)
+  [20/200] multi_turn_long_context_19: PASS  (17 passed, 157s)
+  [21/200] multi_turn_long_context_20: PASS  (18 passed, 167s)
+  [22/200] multi_turn_long_context_21: FAIL  (18 passed, 168s)
+  [23/200] multi_turn_long_context_22: FAIL  (18 passed, 178s)
+  [24/200] multi_turn_long_context_23: FAIL  (18 passed, 178s)
+  [25/200] multi_turn_long_context_26: PASS  (19 passed, 190s)
+  [26/200] multi_turn_long_context_24: PASS  (20 passed, 196s)
+  [27/200] multi_turn_long_context_25: FAIL  (20 passed, 197s)
+  [28/200] multi_turn_long_context_29: PASS  (21 passed, 208s)
+  [29/200] multi_turn_long_context_27: PASS  (22 passed, 210s)
+  [30/200] multi_turn_long_context_28: PASS  (23 passed, 219s)
+  [31/200] multi_turn_long_context_30: FAIL  (23 passed, 228s)
+  [32/200] multi_turn_long_context_31: FAIL  (23 passed, 234s)
+  [33/200] multi_turn_long_context_32: PASS  (24 passed, 238s)
+  [34/200] multi_turn_long_context_33: PASS  (25 passed, 248s)
+  [35/200] multi_turn_long_context_34: PASS  (26 passed, 252s)
+  [36/200] multi_turn_long_context_35: PASS  (27 passed, 265s)
+  [37/200] multi_turn_long_context_36: PASS  (28 passed, 273s)
+  [38/200] multi_turn_long_context_37: PASS  (29 passed, 279s)
+  [39/200] multi_turn_long_context_38: FAIL  (29 passed, 283s)
+  [40/200] multi_turn_long_context_39: PASS  (30 passed, 294s)
+  [41/200] multi_turn_long_context_41: FAIL  (30 passed, 296s)
+  [42/200] multi_turn_long_context_40: PASS  (31 passed, 299s)
+  [43/200] multi_turn_long_context_43: FAIL  (31 passed, 312s)
+  [44/200] multi_turn_long_context_42: PASS  (32 passed, 316s)
+  [45/200] multi_turn_long_context_44: PASS  (33 passed, 316s)
+  [46/200] multi_turn_long_context_45: PASS  (34 passed, 322s)
+  [47/200] multi_turn_long_context_46: FAIL  (34 passed, 328s)
+  [48/200] multi_turn_long_context_47: FAIL  (34 passed, 329s)
+  [49/200] multi_turn_long_context_50: PASS  (35 passed, 334s)
+  [50/200] multi_turn_long_context_48: FAIL  (35 passed, 339s)
+  [51/200] multi_turn_long_context_49: PASS  (36 passed, 344s)
+  [52/200] multi_turn_long_context_51: PASS  (37 passed, 366s)
+  [53/200] multi_turn_long_context_52: PASS  (38 passed, 369s)
+  [54/200] multi_turn_long_context_53: PASS  (39 passed, 369s)
+  [55/200] multi_turn_long_context_54: FAIL  (39 passed, 389s)
+  [56/200] multi_turn_long_context_56: PASS  (40 passed, 399s)
+  [57/200] multi_turn_long_context_55: FAIL  (40 passed, 401s)
+  [58/200] multi_turn_long_context_57: PASS  (41 passed, 405s)
+  [59/200] multi_turn_long_context_58: FAIL  (41 passed, 414s)
+  [60/200] multi_turn_long_context_60: FAIL  (41 passed, 434s)
+  [61/200] multi_turn_long_context_59: PASS  (42 passed, 440s)
+  [62/200] multi_turn_long_context_61: PASS  (43 passed, 444s)
+  [63/200] multi_turn_long_context_62: FAIL  (43 passed, 455s)
+  [64/200] multi_turn_long_context_64: PASS  (44 passed, 464s)
+  [65/200] multi_turn_long_context_63: PASS  (45 passed, 466s)
+  [66/200] multi_turn_long_context_65: PASS  (46 passed, 477s)
+  [67/200] multi_turn_long_context_66: PASS  (47 passed, 487s)
+  [68/200] multi_turn_long_context_67: PASS  (48 passed, 500s)
+  [69/200] multi_turn_long_context_68: FAIL  (48 passed, 503s)
+  [70/200] multi_turn_long_context_69: PASS  (49 passed, 508s)
+  [71/200] multi_turn_long_context_70: FAIL  (49 passed, 524s)
+  [72/200] multi_turn_long_context_71: PASS  (50 passed, 535s)
+  [73/200] multi_turn_long_context_72: PASS  (51 passed, 541s)
+  [74/200] multi_turn_long_context_73: PASS  (52 passed, 547s)
+  [75/200] multi_turn_long_context_74: PASS  (53 passed, 557s)
+  [76/200] multi_turn_long_context_76: PASS  (54 passed, 563s)
+  [77/200] multi_turn_long_context_75: FAIL  (54 passed, 567s)
+  [78/200] multi_turn_long_context_77: PASS  (55 passed, 572s)
+  [79/200] multi_turn_long_context_78: FAIL  (55 passed, 575s)
+  [80/200] multi_turn_long_context_79: PASS  (56 passed, 591s)
+  [81/200] multi_turn_long_context_80: PASS  (57 passed, 606s)
+  [82/200] multi_turn_long_context_81: FAIL  (57 passed, 607s)
+  [83/200] multi_turn_long_context_82: PASS  (58 passed, 622s)
+  [84/200] multi_turn_long_context_84: PASS  (59 passed, 626s)
+  [85/200] multi_turn_long_context_83: PASS  (60 passed, 633s)
+  [86/200] multi_turn_long_context_85: PASS  (61 passed, 644s)
+  [87/200] multi_turn_long_context_86: PASS  (62 passed, 649s)
+  [88/200] multi_turn_long_context_87: PASS  (63 passed, 660s)
+  [89/200] multi_turn_long_context_88: PASS  (64 passed, 668s)
+  [90/200] multi_turn_long_context_89: PASS  (65 passed, 676s)
+  [91/200] multi_turn_long_context_91: FAIL  (65 passed, 680s)
+  [92/200] multi_turn_long_context_93: FAIL  (65 passed, 699s)
+  [93/200] multi_turn_long_context_90: PASS  (66 passed, 702s)
+  [94/200] multi_turn_long_context_92: FAIL  (66 passed, 711s)
+  [95/200] multi_turn_long_context_94: PASS  (67 passed, 723s)
+  [96/200] multi_turn_long_context_96: PASS  (68 passed, 733s)
+  [97/200] multi_turn_long_context_95: PASS  (69 passed, 735s)
+  [98/200] multi_turn_long_context_98: PASS  (70 passed, 759s)
+  [99/200] multi_turn_long_context_99: FAIL  (70 passed, 765s)
+  [100/200] multi_turn_long_context_97: PASS  (71 passed, 766s)
+  [101/200] multi_turn_long_context_100: PASS  (72 passed, 771s)
+  [102/200] multi_turn_long_context_101: PASS  (73 passed, 779s)
+  [103/200] multi_turn_long_context_102: PASS  (74 passed, 789s)
+  [104/200] multi_turn_long_context_104: PASS  (75 passed, 792s)
+  [105/200] multi_turn_long_context_103: PASS  (76 passed, 800s)
+  [106/200] multi_turn_long_context_105: PASS  (77 passed, 801s)
+  [107/200] multi_turn_long_context_106: FAIL  (77 passed, 815s)
+  [108/200] multi_turn_long_context_107: PASS  (78 passed, 822s)
+  [109/200] multi_turn_long_context_108: PASS  (79 passed, 829s)
+  [110/200] multi_turn_long_context_109: FAIL  (79 passed, 847s)
+  [111/200] multi_turn_long_context_111: PASS  (80 passed, 852s)
+  [112/200] multi_turn_long_context_110: FAIL  (80 passed, 852s)
+  [113/200] multi_turn_long_context_113: PASS  (81 passed, 865s)
+  [114/200] multi_turn_long_context_112: PASS  (82 passed, 867s)
+  [115/200] multi_turn_long_context_114: PASS  (83 passed, 875s)
+  [116/200] multi_turn_long_context_115: PASS  (84 passed, 883s)
+  [117/200] multi_turn_long_context_116: PASS  (85 passed, 893s)
+  [118/200] multi_turn_long_context_117: PASS  (86 passed, 905s)
+  [119/200] multi_turn_long_context_118: FAIL  (86 passed, 906s)
+  [120/200] multi_turn_long_context_119: PASS  (87 passed, 911s)
+  [121/200] multi_turn_long_context_120: PASS  (88 passed, 924s)
+  [122/200] multi_turn_long_context_121: FAIL  (88 passed, 924s)
+  [123/200] multi_turn_long_context_122: PASS  (89 passed, 933s)
+  [124/200] multi_turn_long_context_124: FAIL  (89 passed, 939s)
+  [125/200] multi_turn_long_context_123: PASS  (90 passed, 946s)
+  [126/200] multi_turn_long_context_126: FAIL  (90 passed, 950s)
+  [127/200] multi_turn_long_context_125: FAIL  (90 passed, 959s)
+  [128/200] multi_turn_long_context_127: PASS  (91 passed, 964s)
+  [129/200] multi_turn_long_context_128: PASS  (92 passed, 969s)
+  [130/200] multi_turn_long_context_129: FAIL  (92 passed, 980s)
+  [131/200] multi_turn_long_context_130: PASS  (93 passed, 984s)
+  [132/200] multi_turn_long_context_132: PASS  (94 passed, 990s)
+  [133/200] multi_turn_long_context_133: FAIL  (94 passed, 992s)
+  [134/200] multi_turn_long_context_131: PASS  (95 passed, 999s)
+  [135/200] multi_turn_long_context_134: PASS  (96 passed, 1008s)
+  [136/200] multi_turn_long_context_135: PASS  (97 passed, 1013s)
+  [137/200] multi_turn_long_context_136: PASS  (98 passed, 1021s)
+  [138/200] multi_turn_long_context_137: PASS  (99 passed, 1027s)
+  [139/200] multi_turn_long_context_139: PASS  (100 passed, 1031s)
+  [140/200] multi_turn_long_context_138: PASS  (101 passed, 1043s)
+  [141/200] multi_turn_long_context_140: FAIL  (101 passed, 1045s)
+  [142/200] multi_turn_long_context_141: PASS  (102 passed, 1054s)
+  [143/200] multi_turn_long_context_144: PASS  (103 passed, 1064s)
+  [144/200] multi_turn_long_context_143: FAIL  (103 passed, 1067s)
+  [145/200] multi_turn_long_context_142: PASS  (104 passed, 1073s)
+  [146/200] multi_turn_long_context_147: FAIL  (104 passed, 1084s)
+  [147/200] multi_turn_long_context_146: PASS  (105 passed, 1084s)
+  [148/200] multi_turn_long_context_145: PASS  (106 passed, 1088s)
+  [149/200] multi_turn_long_context_150: PASS  (107 passed, 1101s)
+  [150/200] multi_turn_long_context_149: FAIL  (107 passed, 1106s)
+  [151/200] multi_turn_long_context_148: FAIL  (107 passed, 1111s)
+  [152/200] multi_turn_long_context_151: PASS  (108 passed, 1122s)
+  [153/200] multi_turn_long_context_152: FAIL  (108 passed, 1123s)
+  [154/200] multi_turn_long_context_155: FAIL  (108 passed, 1133s)
+  [155/200] multi_turn_long_context_153: PASS  (109 passed, 1138s)
+  [156/200] multi_turn_long_context_157: PASS  (110 passed, 1152s)
+  [157/200] multi_turn_long_context_154: FAIL  (110 passed, 1154s)
+  [158/200] multi_turn_long_context_156: FAIL  (110 passed, 1159s)
+  [159/200] multi_turn_long_context_159: FAIL  (110 passed, 1166s)
+  [160/200] multi_turn_long_context_158: PASS  (111 passed, 1169s)
+  [161/200] multi_turn_long_context_160: FAIL  (111 passed, 1174s)
+  [162/200] multi_turn_long_context_161: PASS  (112 passed, 1181s)
+  [163/200] multi_turn_long_context_163: PASS  (113 passed, 1188s)
+  [164/200] multi_turn_long_context_162: FAIL  (113 passed, 1196s)
+  [165/200] multi_turn_long_context_164: FAIL  (113 passed, 1206s)
+  [166/200] multi_turn_long_context_165: PASS  (114 passed, 1213s)
+  [167/200] multi_turn_long_context_166: PASS  (115 passed, 1220s)
+  [168/200] multi_turn_long_context_167: PASS  (116 passed, 1232s)
+  [169/200] multi_turn_long_context_169: FAIL  (116 passed, 1236s)
+  [170/200] multi_turn_long_context_168: PASS  (117 passed, 1239s)
+  [171/200] multi_turn_long_context_171: FAIL  (117 passed, 1262s)
+  [172/200] multi_turn_long_context_172: FAIL  (117 passed, 1263s)
+  [173/200] multi_turn_long_context_170: FAIL  (117 passed, 1271s)
+  [174/200] multi_turn_long_context_173: FAIL  (117 passed, 1278s)
+  [175/200] multi_turn_long_context_176: PASS  (118 passed, 1289s)
+  [176/200] multi_turn_long_context_175: PASS  (119 passed, 1293s)
+  [177/200] multi_turn_long_context_174: PASS  (120 passed, 1297s)
+  [178/200] multi_turn_long_context_177: FAIL  (120 passed, 1308s)
+  [179/200] multi_turn_long_context_179: PASS  (121 passed, 1319s)
+  [180/200] multi_turn_long_context_178: PASS  (122 passed, 1322s)
+  [181/200] multi_turn_long_context_182: PASS  (123 passed, 1332s)
+  [182/200] multi_turn_long_context_181: FAIL  (123 passed, 1344s)
+  [183/200] multi_turn_long_context_180: PASS  (124 passed, 1350s)
+  [184/200] multi_turn_long_context_183: FAIL  (124 passed, 1352s)
+  [185/200] multi_turn_long_context_185: FAIL  (124 passed, 1365s)
+  [186/200] multi_turn_long_context_184: PASS  (125 passed, 1371s)
+  [187/200] multi_turn_long_context_187: FAIL  (125 passed, 1379s)
+  [188/200] multi_turn_long_context_186: FAIL  (125 passed, 1385s)
+  [189/200] multi_turn_long_context_189: FAIL  (125 passed, 1400s)
+  [190/200] multi_turn_long_context_188: FAIL  (125 passed, 1403s)
+  [191/200] multi_turn_long_context_190: FAIL  (125 passed, 1412s)
+  [192/200] multi_turn_long_context_191: PASS  (126 passed, 1426s)
+  [193/200] multi_turn_long_context_192: PASS  (127 passed, 1429s)
+  [194/200] multi_turn_long_context_193: FAIL  (127 passed, 1431s)
+  [195/200] multi_turn_long_context_194: FAIL  (127 passed, 1456s)
+  [196/200] multi_turn_long_context_195: PASS  (128 passed, 1460s)
+  [197/200] multi_turn_long_context_196: FAIL  (128 passed, 1462s)
+  [198/200] multi_turn_long_context_198: FAIL  (128 passed, 1468s)
+  [199/200] multi_turn_long_context_197: PASS  (129 passed, 1474s)
+  [200/200] multi_turn_long_context_199: FAIL  (129 passed, 1482s)
+  multi_turn_long_context: 129/200 (64.5%) in 1482s
+
+  >> Flushing multi-turn results to disk...
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_python_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_java_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_javascript_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_simple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_multiple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_base_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_func_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_param_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_long_context_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/
+
+── memory_kv ──
+  memory_kv: 135/155 (87.1%) in 2.3s
+
+── memory_vector ──
+  memory_vector: 135/155 (87.1%) in 1.8s
+
+── memory_rec_sum ──
+  memory_rec_sum: 135/155 (87.1%) in 1.8s
+
+  >> Flushing memory results to disk...
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_python_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_java_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_javascript_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_simple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_multiple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_base_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_func_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_param_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_long_context_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/kv/BFCL_v4_memory_kv_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/vector/BFCL_v4_memory_vector_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/rec_sum/BFCL_v4_memory_rec_sum_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/
+
+── web_search_base (workers=5) ──
+  [2] web_search_2: PASS  (expected: ['Dong-Sup Yoon', 'Yoo Dong-Sup', 'Yoon Dong-Sup'])
+  -- 1/100 done, 1 passed, 16s
+  [3] web_search_3: PASS  (expected: ['1871'])
+  -- 2/100 done, 2 passed, 17s
+  [1] web_search_1: PASS  (expected: ['7', 'seven'])
+  -- 3/100 done, 3 passed, 17s
+  [4] web_search_4: PASS  (expected: ['Candlewood', 'Candlewood Lake'])
+  -- 4/100 done, 4 passed, 27s
+  [5] web_search_5: FAIL  (expected: ['70'])
+  -- 5/100 done, 4 passed, 39s
+  [6] web_search_6: PASS  (expected: ['697'])
+  -- 6/100 done, 5 passed, 39s
+  [8] web_search_8: PASS  (expected: ['Black Tickets'])
+  -- 7/100 done, 6 passed, 40s
+  [7] web_search_7: FAIL  (expected: ['1897'])
+  -- 8/100 done, 6 passed, 42s
+  [9] web_search_9: PASS  (expected: ['Srikant Madhav Datar', 'Srikant M. Datar', 'Srikant Datar'])
+  -- 9/100 done, 7 passed, 54s
+  [10] web_search_10: PASS  (expected: ['27'])
+  -- 10/100 done, 8 passed, 66s
+  [12] web_search_12: FAIL  (expected: ['University of North Carolina at Chapel Hill', 'UNC-Chapel Hill'])
+  -- 11/100 done, 8 passed, 67s
+  [11] web_search_11: PASS  (expected: ['51'])
+  -- 12/100 done, 9 passed, 71s
+  [13] web_search_13: FAIL  (expected: ['2012'])
+  -- 13/100 done, 9 passed, 73s
+  [14] web_search_14: PASS  (expected: ['1947'])
+  -- 14/100 done, 10 passed, 84s
+  [16] web_search_16: PASS  (expected: ['2024-10-25'])
+  -- 15/100 done, 11 passed, 87s
+  [0] web_search_0: PASS  (expected: ['Zhang Yiming'])
+  -- 16/100 done, 12 passed, 91s
+  [19] web_search_19: PASS  (expected: ['2023-02-12'])
+  -- 17/100 done, 13 passed, 110s
+  [17] web_search_17: PASS  (expected: ['Samuel', 'Sam'])
+  -- 18/100 done, 14 passed, 110s
+  [15] web_search_15: FAIL  (expected: ['Amazon Rainforest', 'Amazon'])
+  -- 19/100 done, 14 passed, 122s
+  [22] web_search_22: FAIL  (expected: ['2006'])
+  -- 20/100 done, 14 passed, 122s
+  [20] web_search_20: FAIL  (expected: ['3'])
+  -- 21/100 done, 14 passed, 126s
+  [21] web_search_21: PASS  (expected: ['Warren Buffett', 'Warren Edward Buffett'])
+  -- 22/100 done, 15 passed, 134s
+  [25] web_search_25: PASS  (expected: ['03/29/2024'])
+  -- 23/100 done, 16 passed, 136s
+  [24] web_search_24: PASS  (expected: ['1992'])
+  -- 24/100 done, 17 passed, 143s
+  [23] web_search_23: PASS  (expected: ['Czechoslovakia', 'Czechoslovak', 'ČSSR'])
+  -- 25/100 done, 18 passed, 147s
+  [27] web_search_27: FAIL  (expected: ['2025-01-31'])
+  -- 26/100 done, 18 passed, 161s
+  [29] web_search_29: PASS  (expected: ['Olivier Faure'])
+  -- 27/100 done, 19 passed, 165s
+  [26] web_search_26: PASS  (expected: ["Finneas O'Connell", 'Finneas', "Finneas Baird O'Connell"])
+  -- 28/100 done, 20 passed, 166s
+  [30] web_search_30: PASS  (expected: ['Belgium'])
+  -- 29/100 done, 21 passed, 173s
+  [32] web_search_32: PASS  (expected: ['Yuriko Koike', 'Koike Yuriko'])
+  -- 30/100 done, 22 passed, 186s
+  [18] web_search_18: FAIL  (expected: ['Milo the Lynx', 'Milo'])
+  -- 31/100 done, 22 passed, 192s
+  [28] web_search_28: PASS  (expected: ['Charlie Campbell'])
+  -- 32/100 done, 23 passed, 195s
+  [34] web_search_34: PASS  (expected: ['Hawaii'])
+  -- 33/100 done, 24 passed, 204s
+  [33] web_search_33: FAIL  (expected: ['Alice Walton', 'Alice Louise Walton'])
+  -- 34/100 done, 24 passed, 205s
+  [31] web_search_31: FAIL  (expected: ['Valdemar Costa Neto'])
+  -- 35/100 done, 24 passed, 211s
+  [36] web_search_36: PASS  (expected: ['Georgetown University', 'GU'])
+  -- 36/100 done, 25 passed, 216s
+  [37] web_search_37: FAIL  (expected: ['2003'])
+  -- 37/100 done, 25 passed, 220s
+  [35] web_search_35: PASS  (expected: ['one', '1'])
+  -- 38/100 done, 26 passed, 220s
+  [38] web_search_38: PASS  (expected: ['TOSS'])
+  -- 39/100 done, 27 passed, 222s
+  [43] web_search_43: PASS  (expected: ['2024-10-18'])
+  -- 40/100 done, 28 passed, 233s
+  [40] web_search_40: PASS  (expected: ['KU Leuven', 'Katholieke Universiteit Leuven'])
+  -- 41/100 done, 29 passed, 234s
+  [39] web_search_39: FAIL  (expected: ['1992'])
+  -- 42/100 done, 29 passed, 240s
+  [42] web_search_42: PASS  (expected: ['Jayson Tatum', 'Jayson Christopher Tatum'])
+  -- 43/100 done, 30 passed, 244s
+  [45] web_search_45: PASS  (expected: ['Aisen Nikolayev', 'Aysen Nikolayev', 'Aysen Sergeyevich Nikolayev'])
+  -- 44/100 done, 31 passed, 246s
+  [41] web_search_41: PASS  (expected: ['1957'])
+  -- 45/100 done, 32 passed, 246s
+  [44] web_search_44: PASS  (expected: ['Ginny Sutcliffe'])
+  -- 46/100 done, 33 passed, 256s
+  [49] web_search_49: FAIL  (expected: ['Atlantic Records'])
+  -- 47/100 done, 33 passed, 258s
+  [50] web_search_50: PASS  (expected: ['Slovenia'])
+  -- 48/100 done, 34 passed, 261s
+  [47] web_search_47: PASS  (expected: ['El Bulli'])
+  -- 49/100 done, 35 passed, 267s
+  [51] web_search_51: PASS  (expected: ['$222 million', '222 million', '222'])
+  -- 50/100 done, 36 passed, 273s
+  [46] web_search_46: PASS  (expected: ['Christian Democratic Union', 'CDU'])
+  -- 51/100 done, 37 passed, 277s
+  [48] web_search_48: PASS  (expected: ['Daniel Bumba'])
+  -- 52/100 done, 38 passed, 279s
+  [53] web_search_53: PASS  (expected: ['75', '76'])
+  -- 53/100 done, 39 passed, 279s
+  [56] web_search_56: PASS  (expected: ['406200'])
+  -- 54/100 done, 40 passed, 295s
+  [57] web_search_57: FAIL  (expected: ['1-8'])
+  -- 55/100 done, 40 passed, 297s
+  [55] web_search_55: PASS  (expected: ['Joseph Polisena Jr.', 'Joseph M. Polisena, Jr.'])
+  -- 56/100 done, 41 passed, 299s
+  [52] web_search_52: FAIL  (expected: ['Michael Portier'])
+  -- 57/100 done, 41 passed, 306s
+  [59] web_search_59: PASS  (expected: ['1960/03/04'])
+  -- 58/100 done, 42 passed, 310s
+  [58] web_search_58: PASS  (expected: ['Shawanda Evans'])
+  -- 59/100 done, 43 passed, 317s
+  [61] web_search_61: PASS  (expected: ['7'])
+  -- 60/100 done, 44 passed, 325s
+  [54] web_search_54: PASS  (expected: ['Stuart McPherson'])
+  -- 61/100 done, 45 passed, 326s
+  [60] web_search_60: PASS  (expected: ['Sarah Creasey'])
+  -- 62/100 done, 46 passed, 330s
+  [62] web_search_62: PASS  (expected: ['Order of St. Andrew', 'Order of Saint Andrew'])
+  -- 63/100 done, 47 passed, 335s
+  [64] web_search_64: PASS  (expected: ['185'])
+  -- 64/100 done, 48 passed, 343s
+  [66] web_search_66: PASS  (expected: ['Saadiya Ahmed', 'Saadiya'])
+  -- 65/100 done, 49 passed, 346s
+  [65] web_search_65: PASS  (expected: ['Andy Flower'])
+  -- 66/100 done, 50 passed, 353s
+  [67] web_search_67: FAIL  (expected: ['Edward Owens'])
+  -- 67/100 done, 50 passed, 358s
+  [63] web_search_63: PASS  (expected: ['3'])
+  -- 68/100 done, 51 passed, 365s
+  [68] web_search_68: PASS  (expected: ['03/01'])
+  -- 69/100 done, 52 passed, 374s
+  [71] web_search_71: PASS  (expected: ['116,175', '116175'])
+  -- 70/100 done, 53 passed, 385s
+  [73] web_search_73: PASS  (expected: ['Medjugorje'])
+  -- 71/100 done, 54 passed, 385s
+  [69] web_search_69: PASS  (expected: ['Predrag Puharić', 'Predrag'])
+  -- 72/100 done, 55 passed, 389s
+  [72] web_search_72: PASS  (expected: ['Ashiya, Hyōgo', 'Ashiya'])
+  -- 73/100 done, 56 passed, 400s
+  [74] web_search_74: FAIL  (expected: ['6828925'])
+  -- 74/100 done, 56 passed, 403s
+  [70] web_search_70: FAIL  (expected: ['Madrid'])
+  -- 75/100 done, 56 passed, 408s
+  [75] web_search_75: PASS  (expected: ['Saadiya'])
+  -- 76/100 done, 57 passed, 410s
+  [78] web_search_78: PASS  (expected: ['Ricardo Gallardo Cardona'])
+  -- 77/100 done, 58 passed, 422s
+  [80] web_search_80: PASS  (expected: ['1996-10-16'])
+  -- 78/100 done, 59 passed, 424s
+  [77] web_search_77: PASS  (expected: ['Almin Karamehmedovic', 'Wendy A. McMahon', 'Wendy McMahon'])
+  -- 79/100 done, 60 passed, 430s
+  [76] web_search_76: PASS  (expected: ['Teshome Quankusie'])
+  -- 80/100 done, 61 passed, 433s
+  [82] web_search_82: PASS  (expected: ['Sheikh'])
+  -- 81/100 done, 62 passed, 438s
+  [79] web_search_79: FAIL  (expected: ['0', 'zero'])
+  -- 82/100 done, 62 passed, 444s
+  [81] web_search_81: PASS  (expected: ['Paris'])
+  -- 83/100 done, 63 passed, 450s
+  [85] web_search_85: PASS  (expected: ['Mid laner'])
+  -- 84/100 done, 64 passed, 456s
+  [84] web_search_84: FAIL  (expected: ['Gong Zheng'])
+  -- 85/100 done, 64 passed, 460s
+  [83] web_search_83: PASS  (expected: ['3', 'three'])
+  -- 86/100 done, 65 passed, 473s
+  [89] web_search_89: PASS  (expected: ['Jari Latvala'])
+  -- 87/100 done, 66 passed, 480s
+  [86] web_search_86: PASS  (expected: ['1.82', '182', '6 ft 0 in'])
+  -- 88/100 done, 67 passed, 487s
+  [88] web_search_88: PASS  (expected: ['Tracy Dixon'])
+  -- 89/100 done, 68 passed, 490s
+  [87] web_search_87: PASS  (expected: ['Aston Villa'])
+  -- 90/100 done, 69 passed, 494s
+  [91] web_search_91: PASS  (expected: ['1991/09/09'])
+  -- 91/100 done, 70 passed, 496s
+  [90] web_search_90: FAIL  (expected: ['Robert Avery'])
+  -- 92/100 done, 70 passed, 500s
+  [93] web_search_93: PASS  (expected: ['Todd Gloria', 'Todd Rex Gloria'])
+  -- 93/100 done, 71 passed, 506s
+  [97] web_search_97: PASS  (expected: ['Salem'])
+  -- 94/100 done, 72 passed, 518s
+  [95] web_search_95: PASS  (expected: ['Elke Büdenbender', 'Elke Budenbender'])
+  -- 95/100 done, 73 passed, 522s
+  [92] web_search_92: FAIL  (expected: ['1960-08-22'])
+  -- 96/100 done, 73 passed, 523s
+  [96] web_search_96: PASS  (expected: ['Chris Brownridge'])
+  -- 97/100 done, 74 passed, 527s
+  [94] web_search_94: PASS  (expected: ['Yoshiko Nakamura', 'Yoshiko Ishiba'])
+  -- 98/100 done, 75 passed, 530s
+  [98] web_search_98: PASS  (expected: ['49'])
+  -- 99/100 done, 76 passed, 533s
+  [99] web_search_99: PASS  (expected: ['2', 'two'])
+  -- 100/100 done, 77 passed, 553s
+  web_search_base: 77/100 (77.0%) in 553s
+
+── web_search_no_snippet (workers=5) ──
+  [4] web_search_4: PASS  (expected: ['Candlewood', 'Candlewood Lake'])
+  -- 1/100 done, 1 passed, 16s
+  [2] web_search_2: PASS  (expected: ['Dong-Sup Yoon', 'Yoo Dong-Sup', 'Yoon Dong-Sup'])
+  -- 2/100 done, 2 passed, 22s
+  [3] web_search_3: PASS  (expected: ['1871'])
+  -- 3/100 done, 3 passed, 24s
+  [1] web_search_1: PASS  (expected: ['7', 'seven'])
+  -- 4/100 done, 4 passed, 25s
+  [5] web_search_5: PASS  (expected: ['70'])
+  -- 5/100 done, 5 passed, 31s
+  [7] web_search_7: PASS  (expected: ['1897'])
+  -- 6/100 done, 6 passed, 41s
+  [6] web_search_6: PASS  (expected: ['697'])
+  -- 7/100 done, 7 passed, 52s
+  [8] web_search_8: PASS  (expected: ['Black Tickets'])
+  -- 8/100 done, 8 passed, 52s
+  [9] web_search_9: PASS  (expected: ['Srikant Madhav Datar', 'Srikant M. Datar', 'Srikant Datar'])
+  -- 9/100 done, 9 passed, 52s
+  [13] web_search_13: PASS  (expected: ['2012'])
+  -- 10/100 done, 10 passed, 66s
+  [14] web_search_14: PASS  (expected: ['1947'])
+  -- 11/100 done, 11 passed, 75s
+  [12] web_search_12: PASS  (expected: ['University of North Carolina at Chapel Hill', 'UNC-Chapel Hill'])
+  -- 12/100 done, 12 passed, 77s
+  [0] web_search_0: FAIL  (expected: ['Zhang Yiming'])
+  -- 13/100 done, 12 passed, 83s
+  [16] web_search_16: PASS  (expected: ['2024-10-25'])
+  -- 14/100 done, 13 passed, 86s
+  [10] web_search_10: FAIL  (expected: ['27'])
+  -- 15/100 done, 13 passed, 107s
+  [11] web_search_11: FAIL  (expected: ['51'])
+  -- 16/100 done, 13 passed, 110s
+  [15] web_search_15: PASS  (expected: ['Amazon Rainforest', 'Amazon'])
+  -- 17/100 done, 14 passed, 115s
+  [20] web_search_20: FAIL  (expected: ['3'])
+  -- 18/100 done, 14 passed, 125s
+  [19] web_search_19: PASS  (expected: ['2023-02-12'])
+  -- 19/100 done, 15 passed, 129s
+  [17] web_search_17: FAIL  (expected: ['Samuel', 'Sam'])
+  -- 20/100 done, 15 passed, 143s
+  [23] web_search_23: PASS  (expected: ['Czechoslovakia', 'Czechoslovak', 'ČSSR'])
+  -- 21/100 done, 16 passed, 144s
+  [22] web_search_22: FAIL  (expected: ['2006'])
+  -- 22/100 done, 16 passed, 151s
+  [21] web_search_21: PASS  (expected: ['Warren Buffett', 'Warren Edward Buffett'])
+  -- 23/100 done, 17 passed, 151s
+  [24] web_search_24: PASS  (expected: ['1992'])
+  -- 24/100 done, 18 passed, 154s
+  [25] web_search_25: PASS  (expected: ['03/29/2024'])
+  -- 25/100 done, 19 passed, 155s
+  [26] web_search_26: PASS  (expected: ["Finneas O'Connell", 'Finneas', "Finneas Baird O'Connell"])
+  -- 26/100 done, 20 passed, 172s
+  [18] web_search_18: FAIL  (expected: ['Milo the Lynx', 'Milo'])
+  -- 27/100 done, 20 passed, 174s
+  [29] web_search_29: PASS  (expected: ['Olivier Faure'])
+  -- 28/100 done, 21 passed, 180s
+  [30] web_search_30: PASS  (expected: ['Belgium'])
+  -- 29/100 done, 22 passed, 190s
+  [27] web_search_27: FAIL  (expected: ['2025-01-31'])
+  -- 30/100 done, 22 passed, 193s
+  [31] web_search_31: PASS  (expected: ['Valdemar Costa Neto'])
+  -- 31/100 done, 23 passed, 203s
+  [32] web_search_32: PASS  (expected: ['Yuriko Koike', 'Koike Yuriko'])
+  -- 32/100 done, 24 passed, 203s
+  [28] web_search_28: FAIL  (expected: ['Charlie Campbell'])
+  -- 33/100 done, 24 passed, 211s
+  [34] web_search_34: PASS  (expected: ['Hawaii'])
+  -- 34/100 done, 25 passed, 211s
+  [35] web_search_35: PASS  (expected: ['one', '1'])
+  -- 35/100 done, 26 passed, 211s
+  [36] web_search_36: PASS  (expected: ['Georgetown University', 'GU'])
+  -- 36/100 done, 27 passed, 221s
+  [33] web_search_33: PASS  (expected: ['Alice Walton', 'Alice Louise Walton'])
+  -- 37/100 done, 28 passed, 222s
+  [38] web_search_38: PASS  (expected: ['TOSS'])
+  -- 38/100 done, 29 passed, 223s
+  [37] web_search_37: FAIL  (expected: ['2003'])
+  -- 39/100 done, 29 passed, 226s
+  [39] web_search_39: PASS  (expected: ['1992'])
+  -- 40/100 done, 30 passed, 233s
+  [40] web_search_40: PASS  (expected: ['KU Leuven', 'Katholieke Universiteit Leuven'])
+  -- 41/100 done, 31 passed, 234s
+  [43] web_search_43: PASS  (expected: ['2024-10-18'])
+  -- 42/100 done, 32 passed, 236s
+  [45] web_search_45: PASS  (expected: ['Aisen Nikolayev', 'Aysen Nikolayev', 'Aysen Sergeyevich Nikolayev'])
+  -- 43/100 done, 33 passed, 241s
+  [41] web_search_41: PASS  (expected: ['1957'])
+  -- 44/100 done, 34 passed, 242s
+  [42] web_search_42: PASS  (expected: ['Jayson Tatum', 'Jayson Christopher Tatum'])
+  -- 45/100 done, 35 passed, 247s
+  [44] web_search_44: PASS  (expected: ['Ginny Sutcliffe'])
+  -- 46/100 done, 36 passed, 254s
+  [47] web_search_47: PASS  (expected: ['El Bulli'])
+  -- 47/100 done, 37 passed, 255s
+  [46] web_search_46: FAIL  (expected: ['Christian Democratic Union', 'CDU'])
+  -- 48/100 done, 37 passed, 259s
+  [50] web_search_50: PASS  (expected: ['Slovenia'])
+  -- 49/100 done, 38 passed, 261s
+  [49] web_search_49: FAIL  (expected: ['Atlantic Records'])
+  -- 50/100 done, 38 passed, 268s
+  [51] web_search_51: PASS  (expected: ['$222 million', '222 million', '222'])
+  -- 51/100 done, 39 passed, 271s
+  [53] web_search_53: PASS  (expected: ['75', '76'])
+  -- 52/100 done, 40 passed, 279s
+  [55] web_search_55: PASS  (expected: ['Joseph Polisena Jr.', 'Joseph M. Polisena, Jr.'])
+  -- 53/100 done, 41 passed, 290s
+  [56] web_search_56: PASS  (expected: ['406200'])
+  -- 54/100 done, 42 passed, 294s
+  [52] web_search_52: FAIL  (expected: ['Michael Portier'])
+  -- 55/100 done, 42 passed, 297s
+  [57] web_search_57: PASS  (expected: ['1-8'])
+  -- 56/100 done, 43 passed, 308s
+  [59] web_search_59: PASS  (expected: ['1960/03/04'])
+  -- 57/100 done, 44 passed, 310s
+  [54] web_search_54: PASS  (expected: ['Stuart McPherson'])
+  -- 58/100 done, 45 passed, 319s
+  [61] web_search_61: PASS  (expected: ['7'])
+  -- 59/100 done, 46 passed, 322s
+  [62] web_search_62: PASS  (expected: ['Order of St. Andrew', 'Order of Saint Andrew'])
+  -- 60/100 done, 47 passed, 329s
+  [48] web_search_48: FAIL  (expected: ['Daniel Bumba'])
+  -- 61/100 done, 47 passed, 337s
+  [58] web_search_58: PASS  (expected: ['Shawanda Evans'])
+  -- 62/100 done, 48 passed, 339s
+  [60] web_search_60: PASS  (expected: ['Sarah Creasey'])
+  -- 63/100 done, 49 passed, 340s
+  [63] web_search_63: PASS  (expected: ['3'])
+  -- 64/100 done, 50 passed, 343s
+  [64] web_search_64: PASS  (expected: ['185'])
+  -- 65/100 done, 51 passed, 350s
+  [67] web_search_67: PASS  (expected: ['Edward Owens'])
+  -- 66/100 done, 52 passed, 356s
+  [65] web_search_65: PASS  (expected: ['Andy Flower'])
+  -- 67/100 done, 53 passed, 357s
+  [66] web_search_66: PASS  (expected: ['Saadiya Ahmed', 'Saadiya'])
+  -- 68/100 done, 54 passed, 362s
+  [71] web_search_71: PASS  (expected: ['116,175', '116175'])
+  -- 69/100 done, 55 passed, 369s
+  [72] web_search_72: PASS  (expected: ['Ashiya, Hyōgo', 'Ashiya'])
+  -- 70/100 done, 56 passed, 382s
+  [73] web_search_73: PASS  (expected: ['Medjugorje'])
+  -- 71/100 done, 57 passed, 389s
+  [69] web_search_69: PASS  (expected: ['Predrag Puharić', 'Predrag'])
+  -- 72/100 done, 58 passed, 390s
+  [68] web_search_68: PASS  (expected: ['03/01'])
+  -- 73/100 done, 59 passed, 392s
+  [75] web_search_75: PASS  (expected: ['Saadiya'])
+  -- 74/100 done, 60 passed, 405s
+  [76] web_search_76: PASS  (expected: ['Teshome Quankusie'])
+  -- 75/100 done, 61 passed, 410s
+  [74] web_search_74: FAIL  (expected: ['6828925'])
+  -- 76/100 done, 61 passed, 414s
+  [77] web_search_77: PASS  (expected: ['Almin Karamehmedovic', 'Wendy A. McMahon', 'Wendy McMahon'])
+  -- 77/100 done, 62 passed, 419s
+  [78] web_search_78: PASS  (expected: ['Ricardo Gallardo Cardona'])
+  -- 78/100 done, 63 passed, 422s
+  [80] web_search_80: PASS  (expected: ['1996-10-16'])
+  -- 79/100 done, 64 passed, 424s
+  [70] web_search_70: FAIL  (expected: ['Madrid'])
+  -- 80/100 done, 64 passed, 431s
+  [82] web_search_82: PASS  (expected: ['Sheikh'])
+  -- 81/100 done, 65 passed, 441s
+  [81] web_search_81: PASS  (expected: ['Paris'])
+  -- 82/100 done, 66 passed, 445s
+  [83] web_search_83: PASS  (expected: ['3', 'three'])
+  -- 83/100 done, 67 passed, 450s
+  [79] web_search_79: FAIL  (expected: ['0', 'zero'])
+  -- 84/100 done, 67 passed, 453s
+  [85] web_search_85: PASS  (expected: ['Mid laner'])
+  -- 85/100 done, 68 passed, 459s
+  [84] web_search_84: PASS  (expected: ['Gong Zheng'])
+  -- 86/100 done, 69 passed, 459s
+  [86] web_search_86: PASS  (expected: ['1.82', '182', '6 ft 0 in'])
+  -- 87/100 done, 70 passed, 468s
+  [89] web_search_89: PASS  (expected: ['Jari Latvala'])
+  -- 88/100 done, 71 passed, 471s
+  [90] web_search_90: PASS  (expected: ['Robert Avery'])
+  -- 89/100 done, 72 passed, 478s
+  [91] web_search_91: PASS  (expected: ['1991/09/09'])
+  -- 90/100 done, 73 passed, 483s
+  [88] web_search_88: PASS  (expected: ['Tracy Dixon'])
+  -- 91/100 done, 74 passed, 489s
+  [92] web_search_92: PASS  (expected: ['1960-08-22'])
+  -- 92/100 done, 75 passed, 492s
+  [93] web_search_93: PASS  (expected: ['Todd Gloria', 'Todd Rex Gloria'])
+  -- 93/100 done, 76 passed, 500s
+  [95] web_search_95: PASS  (expected: ['Elke Büdenbender', 'Elke Budenbender'])
+  -- 94/100 done, 77 passed, 509s
+  [97] web_search_97: PASS  (expected: ['Salem'])
+  -- 95/100 done, 78 passed, 511s
+  [94] web_search_94: PASS  (expected: ['Yoshiko Nakamura', 'Yoshiko Ishiba'])
+  -- 96/100 done, 79 passed, 518s
+  [98] web_search_98: PASS  (expected: ['49'])
+  -- 97/100 done, 80 passed, 520s
+  [87] web_search_87: FAIL  (expected: ['Aston Villa'])
+  -- 98/100 done, 80 passed, 521s
+  [99] web_search_99: PASS  (expected: ['2', 'two'])
+  -- 99/100 done, 81 passed, 525s
+  [96] web_search_96: PASS  (expected: ['Chris Brownridge'])
+  -- 100/100 done, 82 passed, 530s
+  web_search_no_snippet: 82/100 (82.0%) in 530s
+
+  >> Flushing web search results to disk...
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_python_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_java_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_javascript_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_simple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_multiple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_base_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_func_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_param_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_long_context_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/kv/BFCL_v4_memory_kv_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/vector/BFCL_v4_memory_vector_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/rec_sum/BFCL_v4_memory_rec_sum_result.json
+  Exported: result/glyphh-ada-1.1/agentic/web_search/BFCL_v4_web_search_base_result.json
+  Exported: result/glyphh-ada-1.1/agentic/web_search/BFCL_v4_web_search_no_snippet_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/
+
+
+Total evaluation time: 11524s (192.1m)
+
+====================================================================================================
+  GLYPHH — BFCL V4 FULL EVALUATION REPORT
+  Model: claude-haiku-4-5-20251001
+====================================================================================================
+
+  Category                            Acc  Correct  Total      InTok     OutTok  Calls    Cost$  Lat Mean   Lat SD  Lat P95
+  -------------------------------------------------------------------------------------------------------------------------
+
+  NON-LIVE (10%)
+  │ simple                         94.5%      378    400    287,283     36,465    400  0.3757     3.63s    0.85s    4.78s
+  │ java                           76.0%       76    100  3,752,681    219,358    100  3.8796     4.04s    0.81s    5.09s
+  │ javascript                     72.0%       36     50  4,478,948    280,786     50  4.7063     4.12s    0.86s    5.31s
+  │ multiple                       94.5%      189    200    168,244     18,417    200  0.2083     4.16s    0.98s    5.57s
+  │ parallel                       91.5%      183    200    151,535     44,545    200  0.2994     4.41s    1.15s    5.76s
+  │ parallel_multiple              88.0%      176    200    199,243     49,986    199  0.3593     5.54s    1.58s    7.97s
+
+  HALLUCINATION (10%)
+  │ irrelevance                    85.4%      205    240          0          0      0  0.0000     5.58s    0.41s    6.22s
+  │ live_irrelevance               89.7%      793    884          0          0      0  0.0000     8.06s    4.53s   12.52s
+
+  LIVE (10%)
+  │ live_simple                    84.1%      217    258    204,275     25,628    257  0.2659     3.98s    0.98s    5.33s
+  │ live_multiple                  71.9%      757   1053  1,209,178    112,978  1,053  1.4193     5.57s    1.63s    8.38s
+  │ live_parallel                  75.0%       12     16     12,621      2,981     16  0.0220     4.77s    1.03s    6.43s
+  │ live_parallel_multiple         75.0%       18     24     35,282      3,874     24  0.0437     5.58s    1.79s    8.63s
+
+  MULTI-TURN (30%)
+  │ multi_turn_base                63.5%      127    200  3,746,411    211,888  1,890  3.8447    20.49s    7.21s   32.25s
+  │ multi_turn_miss_func           41.0%       82    200  3,975,717    253,756  2,110  4.1956    23.75s    7.63s   37.56s
+  │ multi_turn_miss_param          50.5%      101    200  3,951,541    237,814  2,102  4.1125    23.34s    7.68s   36.67s
+  │ multi_turn_long_context        64.5%      129    200  3,750,316    214,323  1,906  3.8575    20.97s    7.48s   31.91s
+
+  AGENTIC — MEMORY
+  │ memory_kv                      87.1%      135    155          0          0      0  0.0000     0.01s    0.01s    0.03s
+  │ memory_vector                  87.1%      135    155          0          0      0  0.0000     0.01s    0.00s    0.02s
+  │ memory_rec_sum                 87.1%      135    155          0          0      0  0.0000     0.01s    0.00s    0.02s
+
+  AGENTIC — WEB SEARCH
+  │ web_search_base                77.0%       77    100    537,976     78,970    536  0.7463    26.64s   15.14s   52.02s
+  │ web_search_no_snippet          82.0%       82    100    580,883    106,128    731  0.8892    26.14s   17.77s   65.97s
+
+  ===============================================================================================
+  V4 COMPOSITE SCORES:
+    Non-Live                   86.1% (10%)
+    Hallucination              87.6% (10%)
+    Live                       76.5% (10%)
+    Multi-Turn                 54.9% (30%)
+      Memory Summary           87.1%
+      Web Search Summary       79.5%
+    Agentic                    83.3% (40%)
+
+    OVERALL.................   74.8%  (100% of V4 weight)
+
+  TOTAL TOKEN USAGE:
+    Input tokens:    27,042,134
+    Output tokens:    1,897,897
+    Total tokens:    28,940,031
+    API calls:           11,774
+    Total cost:    $    29.2253
+
+  OVERALL LATENCY:
+    Mean:      8.54s
+    SD:        8.95s
+    P95:      27.14s
+  ===============================================================================================
+
+Results exported to /Users/timmetim/development/glyphh-master/glyphh-models/bfcl/results/full-eval/
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_python_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_java_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_simple_javascript_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/non_live/BFCL_v4_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_irrelevance_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_simple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_multiple_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_result.json
+  Exported: result/glyphh-ada-1.1/live/BFCL_v4_live_parallel_multiple_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_base_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_func_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_miss_param_result.json
+  Exported: result/glyphh-ada-1.1/multi_turn/BFCL_v4_multi_turn_long_context_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/kv/BFCL_v4_memory_kv_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/vector/BFCL_v4_memory_vector_result.json
+  Exported: result/glyphh-ada-1.1/agentic/memory/rec_sum/BFCL_v4_memory_rec_sum_result.json
+  Exported: result/glyphh-ada-1.1/agentic/web_search/BFCL_v4_web_search_base_result.json
+  Exported: result/glyphh-ada-1.1/agentic/web_search/BFCL_v4_web_search_no_snippet_result.json
+
+Gorilla results exported to /Users/timmetim/development/gorilla/berkeley-function-call-leaderboard/result/glyphh-ada-1.1/
