@@ -27,26 +27,70 @@ These scores are produced by the [gorilla eval framework](https://github.com/Shi
 
 | Section | Weight | Score |
 |---------|--------|-------|
-| Non-Live (AST) | 10% | 88.96% |
-| Live (AST) | 10% | 74.46% |
+| Non-Live (AST) | 10% | 88.71% |
+| Live (AST) | 10% | 74.32% |
 | Hallucination | 10% | 87.56% |
-| Multi-Turn | 30% | 42.50% |
-| Agentic (Memory + Web Search) | 40% | 83.05% |
-| **Overall** | **100%** | **71.07%** |
+| Multi-Turn | 30% | 45.00% |
+| Agentic (Memory + Web Search) | 40% | 83.30% |
+| **Overall** | **100%** | **71.88%** |
 
-*Scores as of 2026-03-10. Multi-turn eval with system prompt improvements is in progress.*
+*Gorilla-verified scores as of 2026-03-10. Total eval cost: $2.11 (Claude Haiku 4.5 with prompt caching).*
 
-### Non-Live subcategory breakdown
+### Subcategory breakdown
+
+**Non-Live (AST)**
 
 | Category | Accuracy |
 |----------|----------|
 | Simple (Python) | 94.50% |
 | Java | 76.00% |
 | JavaScript | 72.00% |
-| Multiple | 95.00% |
+| Multiple | 94.50% |
 | Parallel | 91.50% |
-| Parallel Multiple | 88.50% |
+| Parallel Multiple | 88.00% |
 | Irrelevance | 85.42% |
+
+**Live (AST)**
+
+| Category | Accuracy |
+|----------|----------|
+| Live Simple | 84.11% |
+| Live Multiple | 71.89% |
+| Live Parallel | 75.00% |
+| Live Parallel Multiple | 75.00% |
+| Live Irrelevance | 89.71% |
+
+**Multi-Turn**
+
+| Category | Accuracy |
+|----------|----------|
+| Base | 54.50% |
+| Miss Function | 33.50% |
+| Miss Parameter | 38.50% |
+| Long Context | 53.50% |
+
+**Agentic**
+
+| Category | Accuracy |
+|----------|----------|
+| Memory KV | 87.10% |
+| Memory Vector | 87.10% |
+| Memory Recursive Sum | 87.10% |
+| Web Search Base | 77.00% |
+| Web Search No Snippet | 82.00% |
+
+### Cost and latency
+
+| Metric | Value |
+|--------|-------|
+| Total cost | $2.11 |
+| Mean latency | 9.39s |
+| P95 latency | 27.93s |
+| API calls | 11,774 |
+| Input tokens | 27.0M |
+| Output tokens | 1.9M |
+
+For context, the top models on the BFCL V4 leaderboard cost $14–$355 per eval run. Our cost advantage comes from using HDC for routing (zero tokens) and memory (zero tokens), with Claude Haiku only used for argument extraction and multi-turn execution.
 
 ### Pure HDC routing accuracy (internal, no gorilla state execution)
 
@@ -61,7 +105,45 @@ These are routing-only scores — did HDC pick the right function? This does not
 | Agentic (Memory) | 91.6% |
 | **Overall** | **92.7%** |
 
-The gap between internal routing accuracy (92.7%) and gorilla-verified scores (71.07%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
+The gap between internal routing accuracy (92.7%) and gorilla-verified scores (71.88%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
+
+### Multi-turn failure analysis
+
+Of 440 multi-turn failures across all 4 sub-categories:
+
+| Failure Type | Count | % of Failures | Description |
+|---|---|---|---|
+| Empty turn | 240 | 55% | Claude returned text instead of making tool calls |
+| State mismatch | 137 | 31% | Right functions called, wrong arguments (file content, sort order, etc.) |
+| Response mismatch | 63 | 14% | Missing expected execution results |
+
+Empty turns are the #1 problem and the biggest lever for improvement. miss_func is hardest hit (71% of its failures are empty turns) — when held-out functions are added back mid-conversation, Claude often fails to recognize it should act.
+
+### Leaderboard position analysis
+
+As of 2026-03-10, Glyphh Ada 1.1 would rank **#4-5** on the BFCL V4 leaderboard.
+
+| Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
+|------|-------|---------|------|------------|----------|---------|---------|
+| 1 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
+| 2 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
+| 3 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
+| 4 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
+| **—** | **Glyphh Ada 1.1 (HDC+FC)** | **71.88%** | **$2.11** | **45.00%** | **88.71%** | **83.30%** | **9.39s** |
+| 5 | Grok 4.1 Fast (FC) | 69.57% | $17.26 | 58.87% | 88.27% | 68.24% | 6.74s |
+| 6 | Claude Haiku 4.5 (FC) | 68.70% | $14.23 | 53.62% | 86.50% | 68.96% | 1.68s |
+
+**Where we lead:**
+- **Cost**: $2.11 — cheapest on the entire board by 2x+ (next is GLM at $4.64). Opus costs 41x more.
+- **Memory**: 87.10% — best on the board. Pure HDC, zero LLM tokens. Opus scores 73.76%.
+- **Non-Live AST**: 88.71% — top 3, competitive with Opus (88.58%) and Sonnet (88.65%).
+- **Hallucination detection**: 87.56% — top 3, ahead of Haiku standalone (85.11%).
+- **Agentic overall**: 83.30% — best on the board. Strong memory + solid web search.
+
+**Where we trail:**
+- **Multi-Turn**: 45.00% — weakest section, well below Opus (68.38%) and even Haiku standalone (53.62%). This is the single biggest lever: fixing multi-turn to 75% would push overall above 80%.
+
+**The cost-performance insight**: We achieve 71.88% overall at $2.11 per run. The model directly above us (GLM-4.6 at 72.38%) costs 2.2x more. Opus at 77.47% costs 41x more. HDC routing + targeted LLM arg extraction is the most cost-efficient architecture on the leaderboard.
 
 ## Architecture
 
