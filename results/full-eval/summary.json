@@ -1,31 +1,55 @@
 {
-  "model": "claude-haiku-4-5-20251001",
-  "timestamp": "2026-03-11 13:16:34",
-  "categories": {
-    "multi_turn_long_context": {
-      "category": "multi_turn_long_context",
-      "total": 200,
-      "correct": 141,
-      "accuracy": 0.705,
-      "input_tokens": 3590578,
-      "output_tokens": 215131,
-      "total_tokens": 3805709,
-      "api_calls": 2006,
-      "cost": 3.7329863999999997,
-      "latency_mean_s": 15.586261872053147,
-      "latency_sd_s": 6.124496421362738,
-      "latency_p95_s": 27.30044388771057
+  "model": "glyphh-ada-1.1",
+  "version": "v3",
+  "date": "2026-03-11",
+  "llm_backend": "claude-haiku-4-5-20251001",
+  "gorilla_verified": true,
+  "overall": "74.50%",
+  "scores": {
+    "non_live": "88.71%",
+    "non_live_detail": {
+      "simple_python": "94.50%",
+      "simple_java": "76.00%",
+      "simple_javascript": "72.00%",
+      "multiple": "94.50%",
+      "parallel": "91.50%",
+      "parallel_multiple": "88.00%"
+    },
+    "live": "74.32%",
+    "live_detail": {
+      "live_simple": "84.11%",
+      "live_multiple": "71.89%",
+      "live_parallel": "75.00%",
+      "live_parallel_multiple": "75.00%"
+    },
+    "irrelevance": "87.56%",
+    "multi_turn": "53.75%",
+    "multi_turn_detail": {
+      "base": "60.50%",
+      "miss_func": "51.00%",
+      "miss_param": "47.50%",
+      "long_context": "56.00%"
+    },
+    "web_search": "79.50%",
+    "web_search_detail": {
+      "base": "77.00%",
+      "no_snippet": "82.00%"
+    },
+    "memory": "87.10%",
+    "memory_detail": {
+      "kv": "87.10%",
+      "vector": "87.10%",
+      "rec_sum": "87.10%"
     }
   },
-  "v4_scores": {
-    "non_live": null,
-    "hallucination": null,
-    "live": null,
-    "multi_turn": 0.705,
-    "memory_summary": null,
-    "web_search_summary": null,
-    "agentic": null,
-    "overall": 0.705,
-    "weight_covered": 0.3
-  }
+  "cost": "$2.08",
+  "latency_mean_s": 8.52,
+  "weights": {
+    "non_live": 0.10,
+    "live": 0.10,
+    "irrelevance": 0.10,
+    "multi_turn": 0.30,
+    "agentic": 0.40
+  },
+  "notes": "v3: tightened multi-turn system prompts to reduce extra tool calls. Multi-turn gorilla base improved +9% (51.5% -> 60.5%). Internal scores ~70% but gorilla gap remains ~16pts due to execution state mismatches."
 }

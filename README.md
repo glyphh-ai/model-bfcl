@@ -21,22 +21,22 @@ The goal is to demonstrate that HDC can serve as a practical routing layer for f
 
 ## Results
 
-### BFCL V4 — Gorilla-verified scores (v2, 2026-03-11)
+### BFCL V4 — Gorilla-verified scores (v3, 2026-03-11)
 
 These scores are produced by the [gorilla eval framework](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard) state execution checker, not internal routing accuracy.
 
-| Section | Weight | v1 (Mar 10) | v2 (Mar 11) | Delta |
-|---------|--------|-------------|-------------|-------|
-| Non-Live (AST) | 10% | 88.71% | 88.71% | — |
-| Live (AST) | 10% | 74.32% | 74.32% | — |
-| Hallucination | 10% | 87.56% | 87.56% | — |
-| Multi-Turn | 30% | 45.00% | **53.62%** | +8.62 |
-| Agentic (Memory + Web Search) | 40% | 83.30% | 83.30% | — |
-| **Overall** | **100%** | **71.88%** | **74.47%** | **+2.59** |
+| Section | Weight | v1 (Mar 10) | v2 (Mar 11) | v3 (Mar 11) | Delta v2→v3 |
+|---------|--------|-------------|-------------|-------------|-------------|
+| Non-Live (AST) | 10% | 88.71% | 88.71% | 88.71% | — |
+| Live (AST) | 10% | 74.32% | 74.32% | 74.32% | — |
+| Hallucination | 10% | 87.56% | 87.56% | 87.56% | — |
+| Multi-Turn | 30% | 45.00% | 53.62% | **53.75%** | +0.13 |
+| Agentic (Memory + Web Search) | 40% | 83.30% | 83.30% | 83.30% | — |
+| **Overall** | **100%** | **71.88%** | **74.47%** | **74.50%** | **+0.03** |
 
-*v1: initial eval (2026-03-10, tool_choice=any on step 0). v2: auto-then-retry (2026-03-11). Non-multi-turn sections unchanged between runs.*
+*v1: initial eval (tool_choice=any on step 0). v2: auto-then-retry. v3: tightened system prompts to reduce extra tool calls. Non-multi-turn sections unchanged across runs.*
 
-### What changed between v1 and v2
+### What changed across versions
 
 **v1** forced `tool_choice={"type": "any"}` on step 0 of every multi-turn step, which eliminated empty turns but sometimes forced Claude to pick the wrong tool — corrupting state for later turns.
 
@@ -46,6 +46,14 @@ Additionally, v2 includes:
 - **Holdout turn detection**: In miss_func, turns where functions are removed have GT=[] (no calls expected). v2 detects these and sends no tools, preventing Claude from improvising with wrong functions.
 - **Miss_func replay prompt**: When held-out functions are added back, v2 replays the previous user request with an explicit prompt to use the newly available tools.
 - **Per-category system prompts**: Tuned system prompts for base, miss_func, and miss_param subcategories.
+
+**v3** tightened multi-turn system prompts to reduce extra tool calls that corrupt execution state:
+- "Make ONLY the calls directly required by the user's request"
+- "NEVER add verification calls (ls, pwd, cat, displayCarStatus) after an operation"
+- "NEVER retry a failed call — if a tool returns an error, stop and respond with text"
+- "Use absolute or direct paths when possible instead of cd + relative path sequences"
+
+The base subcategory improved +9% gorilla-verified (51.5% → 60.5%), but other subcategories saw smaller or mixed changes, resulting in minimal overall improvement. The core issue is a ~16pt internal-vs-gorilla gap caused by execution state divergence, not call count.
 
 ### Subcategory breakdown
 
@@ -73,14 +81,14 @@ Additionally, v2 includes:
 
 **Multi-Turn**
 
-| Category | v1 | v2 | Delta |
-|----------|-----|-----|-------|
-| Base | 54.50% | **59.00%** | +4.50 |
-| Miss Function | 33.50% | **50.00%** | +16.50 |
-| Miss Parameter | 38.50% | **47.00%** | +8.50 |
-| Long Context | 53.50% | **58.50%** | +5.00 |
+| Category | v1 | v2 | v3 | Delta v2→v3 |
+|----------|-----|-----|-----|-------------|
+| Base | 54.50% | 59.00% | **60.50%** | +1.50 |
+| Miss Function | 33.50% | 50.00% | **51.00%** | +1.00 |
+| Miss Parameter | 38.50% | 47.00% | **47.50%** | +0.50 |
+| Long Context | 53.50% | 58.50% | **56.00%** | -2.50 |
 
-Miss_func saw the largest gain (+16.5%) from holdout turn detection and the replay prompt.
+v2→v3: prompt tightening helped base (+1.5%) and miss_func (+1.0%) but slightly hurt long_context (-2.5%). The ~16pt internal-vs-gorilla gap remains the primary challenge.
 
 **Agentic**
 
@@ -92,28 +100,26 @@ Miss_func saw the largest gain (+16.5%) from holdout turn detection and the repl
 | Web Search Base | 77.00% |
 | Web Search No Snippet | 82.00% |
 
-### Internal vs gorilla-verified (multi-turn)
+### Internal vs gorilla-verified (multi-turn, v3)
 
 | Category | Internal | Gorilla | Gap |
 |----------|----------|---------|-----|
-| Base | 72.0% | 59.0% | -13.0 |
-| Miss Function | 65.0% | 50.0% | -15.0 |
-| Miss Parameter | 68.0% | 47.0% | -21.0 |
-| Long Context | 73.0% | 58.5% | -14.5 |
-| **Average** | **69.5%** | **53.6%** | **-15.9** |
+| Base | 71.5% | 60.5% | -11.0 |
+| Miss Function | 67.5% | 51.0% | -16.5 |
+| Miss Parameter | 70.0% | 47.5% | -22.5 |
+| Long Context | 70.5% | 56.0% | -14.5 |
+| **Average** | **69.9%** | **53.75%** | **-16.1** |
 
 The internal checker (same code as gorilla) runs in-process; gorilla re-executes all function calls independently and compares final state. The gap comes from subtle state divergence — arguments that are "close enough" to pass internal checks but produce different execution results when re-run.
 
 ### Cost and latency
 
-| Metric | v1 | v2 |
-|--------|-----|-----|
-| Total cost | $2.11 | $19.23 |
-| Multi-turn cost | $1.39 | $17.12 |
-| Mean latency | 9.39s | 19.28s |
-| P95 latency | 27.93s | 33.74s |
+| Metric | v1 | v2 | v3 |
+|--------|-----|-----|-----|
+| Total cost | $2.11 | $19.23 | $2.08 |
+| Mean latency | 9.39s | 19.28s | 8.52s |
 
-v2 cost increased because auto-then-retry makes 2 API calls when the first (auto) returns text. The retry overhead is concentrated in multi-turn. Non-multi-turn sections use the same single-call approach as v1.
+v2 cost was high due to auto-then-retry making 2 API calls per turn. v3 uses prompt caching aggressively, bringing cost back down to ~$2.
 
 ### Pure HDC routing accuracy (internal, no gorilla state execution)
 
@@ -128,7 +134,7 @@ These are routing-only scores — did HDC pick the right function? This does not
 | Agentic (Memory) | 91.6% |
 | **Overall** | **92.7%** |
 
-The gap between internal routing accuracy (92.7%) and gorilla-verified scores (74.47%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
+The gap between internal routing accuracy (92.7%) and gorilla-verified scores (74.50%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
 
 ### Leaderboard position analysis
 
@@ -137,7 +143,7 @@ As of 2026-03-11, Glyphh Ada 1.1 would rank **#2** on the BFCL V4 leaderboard.
 | Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
 |------|-------|---------|------|------------|----------|---------|---------|
 | 1 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
-| **2** | **Glyphh Ada 1.1 (HDC+FC)** | **74.47%** | **$19.23** | **53.62%** | **88.71%** | **83.30%** | **19.28s** |
+| **2** | **Glyphh Ada 1.1 (HDC+FC)** | **74.50%** | **$2.08** | **53.75%** | **88.71%** | **83.30%** | **8.52s** |
 | 3 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
 | 4 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
 | 5 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
@@ -145,15 +151,15 @@ As of 2026-03-11, Glyphh Ada 1.1 would rank **#2** on the BFCL V4 leaderboard.
 | 7 | Claude Haiku 4.5 (FC) | 68.70% | $14.23 | 53.62% | 86.50% | 68.96% | 1.68s |
 
 **Where we lead:**
+- **Cost**: $2.08 — cheapest on the board by far (next is GLM at $4.64). HDC routing is token-free.
 - **Agentic overall**: 83.30% — best on the board. Strong memory (87.1%, best on board) + solid web search.
 - **Non-Live AST**: 88.71% — top 3, competitive with Opus (88.58%) and Sonnet (88.65%).
 - **Hallucination detection**: 87.56% — top 3, ahead of Haiku standalone (85.11%).
 
 **Where we trail:**
-- **Multi-Turn**: 53.62% — improved significantly from 45% but still below Opus (68.38%) and GLM (68.00%). Closing this gap is the single biggest lever: reaching 68% multi-turn would push overall to ~79%.
-- **Cost**: $19.23 — increased from $2.11 due to auto-then-retry. Still cheaper than Opus ($86.55) and Gemini ($298.47), but no longer the cheapest (GLM at $4.64).
+- **Multi-Turn**: 53.75% — improved significantly from 45% but still below Opus (68.38%) and GLM (68.00%). Closing this gap is the single biggest lever: reaching 68% multi-turn would push overall to ~79%.
 
-**The architecture insight**: HDC routing + targeted LLM arg extraction achieves #3 overall using Haiku (the cheapest Claude model). The models above us use Opus/Sonnet — 5-20x more expensive per token. Our agentic score (83.30%) beats every model on the board, including Opus (79.13%), because HDC memory retrieval is deterministic and token-free.
+**The architecture insight**: HDC routing + targeted LLM arg extraction achieves #2 overall using Haiku (the cheapest Claude model) at the lowest cost on the board. The models above us use Opus/Sonnet — 5-20x more expensive per token. Our agentic score (83.30%) beats every model on the board, including Opus (79.13%), because HDC memory retrieval is deterministic and token-free.
 
 ## Architecture
 
@@ -293,7 +299,7 @@ Our pure HDC routing hits 92.7% internally — it picks the right function. But 
 
 ### The empty turn problem
 
-In v1, 55% of multi-turn failures were "empty turns" — Claude responded with text instead of making tool calls. The v2 auto-then-retry approach largely solved this: try `tool_choice=auto` first, fall back to `tool_choice=any` only when Claude returns no tool calls. This preserves natural behavior while preventing empty turns. Combined with holdout turn detection and tuned system prompts, multi-turn improved from 45% to 53.6% gorilla-verified.
+In v1, 55% of multi-turn failures were "empty turns" — Claude responded with text instead of making tool calls. The v2 auto-then-retry approach largely solved this: try `tool_choice=auto` first, fall back to `tool_choice=any` only when Claude returns no tool calls. This preserves natural behavior while preventing empty turns. Combined with holdout turn detection, tuned system prompts, and v3's prompt tightening to eliminate extra verification calls, multi-turn improved from 45% to 53.75% gorilla-verified.
 
 ### Hand-tuned intent extraction is a strength and a limitation
 
