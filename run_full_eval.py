@@ -932,13 +932,11 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         _user_count += 1
 
                 try:
-                    # Force tool call on first step to prevent empty turns;
-                    # use auto on subsequent steps so Claude can stop naturally
-                    tc = {"type": "any"} if step == 0 else {"type": "auto"}
+                    # Auto-then-retry: try auto first, fall back to any if empty
                     response = client.messages.create(
                         model=MODEL, temperature=0.0, max_tokens=8192,
                         system=turn_system, tools=filtered_tools, messages=messages,
-                        tool_choice=tc,
+                        tool_choice={"type": "auto"},
                     )
                 except Exception as e:
                     safe_print(f"    API error ({scenario_id}): {e}")
@@ -950,6 +948,25 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                 token_usage["api_calls"] += 1
 
                 tool_uses = [b for b in response.content if b.type == "tool_use"]
+
+                # If step 0 returned no tool calls, retry with forced tool_choice
+                if step == 0 and not tool_uses:
+                    try:
+                        response = client.messages.create(
+                            model=MODEL, temperature=0.0, max_tokens=8192,
+                            system=turn_system, tools=filtered_tools, messages=messages,
+                            tool_choice={"type": "any"},
+                        )
+                    except Exception as e:
+                        safe_print(f"    API retry error ({scenario_id}): {e}")
+                        break
+
+                    if hasattr(response, "usage") and response.usage:
+                        token_usage["input_tokens"] += response.usage.input_tokens
+                        token_usage["output_tokens"] += response.usage.output_tokens
+                    token_usage["api_calls"] += 1
+
+                    tool_uses = [b for b in response.content if b.type == "tool_use"]
 
                 assistant_content = []
                 for block in response.content:
