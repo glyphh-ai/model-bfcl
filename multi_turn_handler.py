@@ -398,6 +398,125 @@ class MultiTurnHandler:
 
         return candidate_fdefs if candidate_fdefs else list(self._func_defs.values()), self._get_cwd()
 
+    def get_hdc_suggestions(self, query: str) -> list[dict]:
+        """Return HDC-ranked tool suggestions for the query.
+
+        Returns list of {name, score, params} dicts, ordered by relevance.
+        Uses intent extraction + domain_config action_to_func for direct mapping,
+        and HDC cosine scores for ranking. Includes parameter hints from the query.
+        """
+        from intent import extract_intent
+        from domain_config import CLASS_DOMAIN_CONFIGS
+
+        intent = extract_intent(query)
+        action = intent.get("action", "none")
+        keywords = intent.get("keywords", "").split()
+
+        suggestions = []
+        seen = set()
+
+        # Stage 1: Direct action→func mapping (highest confidence)
+        for class_name in self._involved_classes:
+            dc = CLASS_DOMAIN_CONFIGS.get(class_name)
+            if not dc:
+                continue
+            a2f = dc.action_to_func or {}
+            if action in a2f:
+                full_name = a2f[action]
+                bare = _strip_class_prefix(full_name)
+                if bare not in seen:
+                    seen.add(bare)
+                    fd = self._func_defs.get(full_name)
+                    param_hints = self._extract_param_hints(fd, query, keywords) if fd else {}
+                    suggestions.append({
+                        "name": bare,
+                        "score": 1.0,
+                        "source": "action_map",
+                        "params": param_hints,
+                    })
+
+        # Stage 2: HDC cosine scores
+        for class_name in self._involved_classes:
+            scorer = self._scorers.get(class_name)
+            if not scorer:
+                continue
+            result = scorer.score(query)
+            for s in (result.all_scores or [])[:3]:
+                bare = _strip_class_prefix(s["function"])
+                if bare not in seen:
+                    seen.add(bare)
+                    fd = self._func_defs.get(s["function"])
+                    param_hints = self._extract_param_hints(fd, query, keywords) if fd else {}
+                    suggestions.append({
+                        "name": bare,
+                        "score": s["score"],
+                        "source": "hdc",
+                        "params": param_hints,
+                    })
+
+        return suggestions
+
+    def _extract_param_hints(self, func_def: dict, query: str, keywords: list[str]) -> dict:
+        """Extract likely parameter values from query text for a function.
+
+        Uses simple heuristics:
+        - Quoted strings → string params
+        - Path-like tokens → file/folder params
+        - Numbers → numeric params
+        """
+        import re
+        params = func_def.get("parameters", {}).get("properties", {})
+        if not params:
+            return {}
+
+        hints = {}
+
+        # Extract quoted strings from query
+        quoted = re.findall(r"['\"]([^'\"]+)['\"]", query)
+        # Extract path-like tokens (contain . or /)
+        path_tokens = [w for w in keywords if '.' in w or '/' in w]
+        # All potential values
+        values = quoted + path_tokens
+
+        # CWD context
+        cwd = self._get_cwd()
+
+        for pname, pdef in params.items():
+            pdesc = pdef.get("description", "").lower()
+            ptype = pdef.get("type", "string")
+
+            # File/folder name params
+            if any(w in pname.lower() for w in ("file", "name", "source", "destination", "folder", "dir")):
+                if pname.lower() in ("folder", "dir_name", "directory"):
+                    # Look for folder-like values (no extension)
+                    for v in values:
+                        if '.' not in v:
+                            hints[pname] = v
+                            break
+                else:
+                    # Look for file-like values
+                    for v in values:
+                        if v:
+                            hints[pname] = v
+                            break
+
+            # Content/pattern params — use longest quoted string
+            elif any(w in pname.lower() for w in ("content", "text", "pattern", "keyword")):
+                if quoted:
+                    # Use longest quoted string for content, shortest for pattern
+                    if "content" in pname.lower() or "text" in pname.lower():
+                        hints[pname] = max(quoted, key=len)
+                    else:
+                        hints[pname] = min(quoted, key=len)
+
+            # Numeric params
+            elif ptype in ("integer", "number"):
+                nums = re.findall(r'\b(\d+)\b', query)
+                if nums:
+                    hints[pname] = int(nums[0])
+
+        return hints
+
     def _get_cwd(self) -> str:
         """Get current working directory from CognitiveLoop state."""
         for class_name in self._involved_classes:

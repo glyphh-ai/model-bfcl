@@ -624,8 +624,8 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
 # SECTION 2: Multi-Turn (LLM execution loop with threading)
 # ══════════════════════════════════════════════════════════════════════════
 
-# Clean system prompt — general function-calling guidance only, no BFCL-specific gaming
-MULTI_TURN_SYSTEM_PROMPT_RULES = (
+# System prompts per multi-turn category
+MULTI_TURN_SYSTEM_PROMPT_BASE = (
     "You are a helpful assistant with access to tools. "
     "Always use the provided tools to fulfill user requests. "
     "Make function calls rather than describing what you would do. "
@@ -633,11 +633,45 @@ MULTI_TURN_SYSTEM_PROMPT_RULES = (
     "You may call multiple tools in sequence within a single turn if needed."
 )
 
+MULTI_TURN_SYSTEM_PROMPT_MISS_FUNC = (
+    "You are a helpful assistant with access to tools. "
+    "Always use the provided tools to fulfill user requests. "
+    "Make function calls rather than describing what you would do. "
+    "If the user asks you to perform an action, call the appropriate tool immediately. "
+    "You may call multiple tools in sequence within a single turn if needed. "
+    "IMPORTANT: If the specific tool you need is NOT in your available tools, "
+    "respond with text explaining you cannot do it — do NOT improvise by using "
+    "other tools as workarounds. Only call tools that directly match the request. "
+    "New tools may become available during the conversation. When the user tells you "
+    "new tools are available and references a previous request, you MUST use the new "
+    "tools to fulfill that request by making function calls."
+)
+
+MULTI_TURN_SYSTEM_PROMPT_MISS_PARAM = (
+    "You are a helpful assistant with access to tools. "
+    "Always use the provided tools to fulfill user requests. "
+    "Make function calls rather than describing what you would do. "
+    "If the user asks you to perform an action, call the appropriate tool immediately. "
+    "You may call multiple tools in sequence within a single turn if needed. "
+    "Some tool parameters may be missing initially but provided later. When the user "
+    "provides missing information, immediately make the function call with the complete parameters."
+)
+
+# Alias for backward compat
+MULTI_TURN_SYSTEM_PROMPT_RULES = MULTI_TURN_SYSTEM_PROMPT_BASE
+
 MAX_STEPS_PER_TURN = 10
 
 
-def _build_mt_system_prompt(initial_config: dict) -> str:
-    parts = [MULTI_TURN_SYSTEM_PROMPT_RULES]
+def _build_mt_system_prompt(initial_config: dict, category: str = "") -> str:
+    # Select category-specific system prompt
+    if "miss_func" in category:
+        base_prompt = MULTI_TURN_SYSTEM_PROMPT_MISS_FUNC
+    elif "miss_param" in category:
+        base_prompt = MULTI_TURN_SYSTEM_PROMPT_MISS_PARAM
+    else:
+        base_prompt = MULTI_TURN_SYSTEM_PROMPT_BASE
+    parts = [base_prompt]
     if initial_config:
         state_context = "\n\nSystem state (use EXACT names from here):\n"
         for cls_name, config in initial_config.items():
@@ -767,8 +801,8 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     handler = MultiTurnHandler()
     handler.setup(entry, func_defs)
 
-    # Build system prompt with state context
-    system_prompt = _build_mt_system_prompt(initial_config)
+    # Build system prompt with state context (category-specific)
+    system_prompt = _build_mt_system_prompt(initial_config, category=category)
 
     messages = []
     all_turn_decoded = []
@@ -781,19 +815,73 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
             # Check if this is a holdout turn — add back held-out functions
             if str(turn_idx) in holdout_function:
                 added_fds = []
+                added_names = []
                 for hf_name in holdout_function[str(turn_idx)]:
                     if hf_name in holdout_func_defs:
                         fd = holdout_func_defs[hf_name]
                         func_defs.append(fd)
                         added_fds.append(fd)
+                        added_names.append(hf_name)
                 if added_fds:
                     handler.add_functions(added_fds)
-                query = "I have updated some more functions you can choose from. What about now?"
+                # Replay the previous turn's request so Claude knows what to do
+                prev_query = queries[turn_idx - 1] if turn_idx > 0 else ""
+                if prev_query:
+                    query = (
+                        f"New tools are now available: {', '.join(added_names)}. "
+                        f"The user previously requested: \"{prev_query}\" "
+                        f"Please fulfill this request now using the available tools."
+                    )
+                else:
+                    query = (
+                        f"New tools are now available: {', '.join(added_names)}. "
+                        f"Please use them to fulfill the user's most recent request."
+                    )
 
             if not query:
                 all_turn_decoded.append([])
                 all_turn_gorilla.append([])
                 handler.record_turn("", [])
+                continue
+
+            # Holdout turn detection: if the NEXT turn adds back held-out functions,
+            # this turn is a "missing function" turn where the model should NOT call tools.
+            # Sending tools=[] prevents improvisation that corrupts execution state.
+            is_holdout_turn = str(turn_idx + 1) in holdout_function
+
+            if is_holdout_turn:
+                # Force text-only response — GT expects zero tool calls
+                messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
+
+                try:
+                    response = client.messages.create(
+                        model=MODEL, temperature=0.0, max_tokens=8192,
+                        messages=messages,
+                    )
+                except Exception as e:
+                    safe_print(f"    API error ({scenario_id}): {e}")
+                    all_turn_decoded.append([])
+                    all_turn_gorilla.append([])
+                    handler.record_turn(query, [])
+                    continue
+
+                if hasattr(response, "usage") and response.usage:
+                    token_usage["input_tokens"] += response.usage.input_tokens
+                    token_usage["output_tokens"] += response.usage.output_tokens
+                token_usage["api_calls"] += 1
+
+                # Record assistant text response (no tool calls)
+                assistant_content = []
+                for block in response.content:
+                    if block.type == "text" and block.text:
+                        assistant_content.append({"type": "text", "text": block.text})
+                if not assistant_content:
+                    assistant_content.append({"type": "text", "text": "I understand, but I don't have the required tools to complete this request right now."})
+                messages.append({"role": "assistant", "content": assistant_content})
+
+                all_turn_decoded.append([])
+                all_turn_gorilla.append([])
+                handler.record_turn(query, [])
                 continue
 
             # HDC route to get filtered tools + CWD from CognitiveLoop
@@ -814,7 +902,6 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         filtered_tools.append(tool)
                         filtered_names.add(tool["name"])
 
-            # Enable prompt caching on system prompt and tools
             # System prompt: cache the static instruction block
             turn_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
 
@@ -845,9 +932,13 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         _user_count += 1
 
                 try:
+                    # Force tool call on first step to prevent empty turns;
+                    # use auto on subsequent steps so Claude can stop naturally
+                    tc = {"type": "any"} if step == 0 else {"type": "auto"}
                     response = client.messages.create(
-                        model=MODEL, temperature=0.0, max_tokens=4096,
+                        model=MODEL, temperature=0.0, max_tokens=8192,
                         system=turn_system, tools=filtered_tools, messages=messages,
+                        tool_choice=tc,
                     )
                 except Exception as e:
                     safe_print(f"    API error ({scenario_id}): {e}")
@@ -862,13 +953,15 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
 
                 assistant_content = []
                 for block in response.content:
-                    if block.type == "text":
+                    if block.type == "text" and block.text:
                         assistant_content.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use":
                         assistant_content.append({
                             "type": "tool_use", "id": block.id,
                             "name": block.name, "input": block.input,
                         })
+                if not assistant_content:
+                    assistant_content.append({"type": "text", "text": "I'll help with that."})
                 messages.append({"role": "assistant", "content": assistant_content})
 
                 if not tool_uses:
@@ -937,24 +1030,48 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     return {
         "id": scenario_id,
         "passed": check_result["valid"],
+        "error": check_result.get("error_message", check_result.get("error", None)) if not check_result["valid"] else None,
         "result": all_turn_gorilla,
+        "decoded": all_turn_decoded,
         "tokens": token_usage,
         "latency": latency,
     }
 
 
-def run_multi_turn_categories(categories: list[str], workers: int = 3) -> list[CategoryResult]:
+def run_multi_turn_categories(categories: list[str], workers: int = 3, max_entries: int = 0, offset: int = 0) -> list[CategoryResult]:
     """Run multi-turn categories with threaded execution."""
     results = []
     client = anthropic.Anthropic()
 
+    # Progress log — one file per run, append per-entry results in real time
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    run_ts = time.strftime("%Y%m%d_%H%M%S")
+    log_path = RESULT_DIR / f"run_{run_ts}.log"
+    _log_lock = threading.Lock()
+
+    def _log(msg: str):
+        line = f"[{time.strftime('%H:%M:%S')}] {msg}\n"
+        with _log_lock:
+            with open(log_path, "a") as f:
+                f.write(line)
+
+    _log(f"Run started: categories={categories}, workers={workers}, max_entries={max_entries or 'all'}")
+
     for cat in categories:
         print(f"\n── {cat} ──")
+        _log(f"── {cat} ──")
         cr = CategoryResult(cat)
 
         entries = load_jsonl(DATA_DIR / BFCL_FILES[cat])
         gt_entries = load_jsonl(DATA_DIR / BFCL_ANSWER_FILES[cat])
+        if offset > 0:
+            entries = entries[offset:]
+            gt_entries = gt_entries[offset:]
+        if max_entries > 0:
+            entries = entries[:max_entries]
+            gt_entries = gt_entries[:max_entries]
 
+        _log(f"  Loaded {len(entries)} entries")
         t0 = time.time()
         done_count = 0
 
@@ -978,13 +1095,22 @@ def run_multi_turn_categories(categories: list[str], workers: int = 3) -> list[C
                 passed_so_far = cr.correct
                 elapsed = time.time() - t0
                 status = "PASS" if r["passed"] else "FAIL"
-                safe_print(f"  [{done_count}/{len(entries)}] {r['id']}: {status}  "
-                          f"({passed_so_far} passed, {elapsed:.0f}s)")
+                pct = 100 * passed_so_far / done_count
+                msg = (f"  [{done_count}/{len(entries)}] {r['id']}: {status}  "
+                       f"({passed_so_far} passed, {pct:.0f}%, {elapsed:.0f}s)")
+                safe_print(msg)
+                err_detail = f" | error: {r.get('error', '')}" if not r["passed"] and r.get("error") else ""
+                _log(f"  [{done_count}/{len(entries)}] {r['id']}: {status} "
+                     f"({passed_so_far}/{done_count} = {pct:.0f}%){err_detail}")
 
         elapsed = time.time() - t0
-        print(f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s")
+        summary_msg = f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s | cost=${cr.cost:.2f}"
+        print(summary_msg)
+        _log(summary_msg)
         results.append(cr)
 
+    _log(f"Run complete. Log: {log_path}")
+    print(f"\nProgress log: {log_path}")
     return results
 
 
@@ -1465,12 +1591,14 @@ def export_gorilla_results(all_results: list[CategoryResult]):
 
 
 def export_all_results(all_results: list[CategoryResult]):
-    """Export per-category result files + summary JSON + gorilla format."""
+    """Export per-category result files + detailed log + summary JSON + gorilla format."""
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
     for cr in all_results:
         if not cr.results:
             continue
+
+        # 1. Gorilla-compatible result file (for re-evaluation without re-running)
         fpath = RESULT_DIR / f"BFCL_v4_{cr.category}_result.json"
         with open(fpath, "w") as f:
             for r in cr.results:
@@ -1483,6 +1611,23 @@ def export_all_results(all_results: list[CategoryResult]):
                     "latency": r.get("latency", 0.0),
                 }
                 f.write(json.dumps(entry) + "\n")
+
+        # 2. Detailed log with pass/fail, errors, decoded calls, and per-entry metrics
+        log_path = RESULT_DIR / f"BFCL_v4_{cr.category}_log.json"
+        with open(log_path, "w") as f:
+            for r in cr.results:
+                tokens = r.get("tokens", {})
+                log_entry = {
+                    "id": r.get("id", ""),
+                    "passed": r.get("passed", False),
+                    "error": r.get("error"),
+                    "decoded_calls": r.get("decoded", []),
+                    "input_tokens": tokens.get("input_tokens", 0),
+                    "output_tokens": tokens.get("output_tokens", 0),
+                    "api_calls": tokens.get("api_calls", 0),
+                    "latency_s": r.get("latency", 0.0),
+                }
+                f.write(json.dumps(log_entry) + "\n")
 
     # Summary
     summary = {
