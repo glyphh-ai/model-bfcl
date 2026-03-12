@@ -6,12 +6,12 @@ Built on the [Glyphh](https://www.glyphh.ai) hyperdimensional computing runtime.
 
 ## What this is (and isn't)
 
-This model uses **hyperdimensional computing (HDC)** for function routing and **Claude Haiku 4.5** for argument extraction. It is not a general-purpose LLM. It is a purpose-built system that combines deterministic vector math with targeted LLM calls to solve the function calling problem.
+This model uses **hyperdimensional computing (HDC)** for function routing and a **Claude LLM** for argument extraction. It is not a general-purpose LLM. It is a purpose-built system that combines deterministic vector math with targeted LLM calls to solve the function calling problem.
 
 We are transparent about the approach:
 
 - **HDC handles routing** — which function to call. This is deterministic, sub-millisecond, and uses zero LLM tokens at inference time for the routing decision itself.
-- **Claude Haiku handles arguments** — what values to pass. The LLM sees only the matched function schema and the user query. It fills in parameters.
+- **Claude handles arguments** — what values to pass. The LLM sees only the matched function schema and the user query. It fills in parameters.
 - **Exemplars are pre-built at build time** — we use Claude to generate natural language variations of each function's intent, encode them into HDC vectors, and search against them at runtime. This is the same paradigm inversion strategy described in the [Pipedream white paper](../pipedream/white-paper.md).
 - **Intent extraction is hand-tuned per domain** — each API class has custom verb/target/keyword maps in `intent.py`. This is not a generic model; it is specifically engineered for the 9 API classes and 128 functions in the BFCL V4 multi-turn benchmark.
 - **Irrelevance detection uses a dedicated HDC model** — a separate encoder (seed=53) with parameter-name alignment as primary signal, no LLM involved.
@@ -21,109 +21,54 @@ The goal is to demonstrate that HDC can serve as a practical routing layer for f
 
 ## Results
 
-### BFCL V4 — Gorilla-verified scores (v3, 2026-03-11)
+We evaluate the same HDC routing pipeline with different LLMs for argument extraction. The HDC layer (routing, intent extraction, irrelevance detection, memory) is identical across all versions — only the argument extraction LLM changes.
 
-These scores are produced by the [gorilla eval framework](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard) state execution checker, not internal routing accuracy.
+All scores are gorilla-verified (state execution checker), not internal routing accuracy.
 
-| Section | Weight | v1 (Mar 10) | v2 (Mar 11) | v3 (Mar 11) | Delta v2→v3 |
-|---------|--------|-------------|-------------|-------------|-------------|
-| Non-Live (AST) | 10% | 88.71% | 88.71% | 88.71% | — |
-| Live (AST) | 10% | 74.32% | 74.32% | 74.32% | — |
-| Hallucination | 10% | 87.56% | 87.56% | 87.56% | — |
-| Multi-Turn | 30% | 45.00% | 53.62% | **53.75%** | +0.13 |
-| Agentic (Memory + Web Search) | 40% | 83.30% | 83.30% | 83.30% | — |
-| **Overall** | **100%** | **71.88%** | **74.47%** | **74.50%** | **+0.03** |
+### Version comparison
 
-*v1: initial eval (tool_choice=any on step 0). v2: auto-then-retry. v3: tightened system prompts to reduce extra tool calls. Non-multi-turn sections unchanged across runs.*
+| Section | Weight | [Haiku 4.5](results/v1-haiku-4.5.md) (v3) | [Opus 4.5](results/v2-opus-4.5.md) | Delta |
+|---------|--------|---------------------------------------------|--------------------------------------|-------|
+| Non-Live (AST) | 10% | 88.71% | **90.56%** | +1.85 |
+| Live (AST) | 10% | 74.32% | **75.50%** | +1.18 |
+| Hallucination | 10% | 87.56% | 87.56% | -- |
+| Multi-Turn | 30% | 53.75% | **65.12%** | +11.37 |
+| Agentic | 40% | 83.30% | **87.55%** | +4.25 |
+| **Overall** | **100%** | **74.50%** | **79.92%** | **+5.42** |
+| **Cost** | | $2.08 | ~$50 | |
+| **Latency** | | 8.52s | 13.16s | |
 
-### What changed across versions
+Detailed breakdowns, subcategory scores, and version history for each eval are in the linked results files.
 
-**v1** forced `tool_choice={"type": "any"}` on step 0 of every multi-turn step, which eliminated empty turns but sometimes forced Claude to pick the wrong tool — corrupting state for later turns.
+### Leaderboard position (Opus 4.5, current best)
 
-**v2** uses auto-then-retry: try `tool_choice=auto` first (natural behavior), only fall back to `tool_choice=any` if Claude returns text instead of tool calls. This preserves Claude's judgment while still preventing empty turns.
+As of 2026-03-11, Glyphh Ada 1.1 would rank **#1** on the BFCL V4 leaderboard.
 
-Additionally, v2 includes:
-- **Holdout turn detection**: In miss_func, turns where functions are removed have GT=[] (no calls expected). v2 detects these and sends no tools, preventing Claude from improvising with wrong functions.
-- **Miss_func replay prompt**: When held-out functions are added back, v2 replays the previous user request with an explicit prompt to use the newly available tools.
-- **Per-category system prompts**: Tuned system prompts for base, miss_func, and miss_param subcategories.
+| Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
+|------|-------|---------|------|------------|----------|---------|---------|
+| **1** | **Glyphh Ada 1.1 (HDC+FC)** | **79.92%** | **~$50** | **65.12%** | **90.56%** | **87.55%** | **13.16s** |
+| 2 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
+| 3 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
+| 4 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
+| 5 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
+| 6 | Grok 4.1 Fast (FC) | 69.57% | $17.26 | 58.87% | 88.27% | 68.24% | 6.74s |
+| 7 | Claude Haiku 4.5 (FC) | 68.70% | $14.23 | 53.62% | 86.50% | 68.96% | 1.68s |
 
-**v3** tightened multi-turn system prompts to reduce extra tool calls that corrupt execution state:
-- "Make ONLY the calls directly required by the user's request"
-- "NEVER add verification calls (ls, pwd, cat, displayCarStatus) after an operation"
-- "NEVER retry a failed call — if a tool returns an error, stop and respond with text"
-- "Use absolute or direct paths when possible instead of cd + relative path sequences"
+**Where we lead:**
+- **Overall**: 79.92% — #1 on the board, 2.45 points ahead of Opus standalone (77.47%).
+- **Agentic**: 87.55% — best on the board. Strong memory (87.1%, best on board) + web search (88.0%).
+- **Non-Live AST**: 90.56% — best on the board, ahead of Opus standalone (88.58%).
+- **Hallucination detection**: 87.56% — top 3, ahead of Haiku standalone (85.11%).
 
-The base subcategory improved +9% gorilla-verified (51.5% → 60.5%), but other subcategories saw smaller or mixed changes, resulting in minimal overall improvement. The core issue is a ~16pt internal-vs-gorilla gap caused by execution state divergence, not call count.
+**Where we trail:**
+- **Multi-Turn**: 65.12% — improved +11.37 from Haiku but still below Opus standalone (68.38%) and GLM (68.00%). A ~16pt internal-vs-gorilla gap persists across both LLMs, suggesting structural execution state divergence rather than model quality.
+- **Latency**: 13.16s mean — slower than pure LLM approaches due to multi-stage pipeline.
 
-### Subcategory breakdown
+**The architecture insight**: HDC routing + Opus arg extraction achieves #1 overall. The same HDC layer with Haiku ($2.08) scores 74.50% — still #4 on the board at the lowest cost. Swapping only the LLM (no HDC changes) added +5.42 points, confirming that HDC routing and LLM arg extraction are independently tunable. Our agentic score (87.55%) beats every model on the board, including Opus standalone (79.13%), because HDC memory retrieval is deterministic and token-free.
 
-**Non-Live (AST)**
+### Pure HDC routing accuracy
 
-| Category | Accuracy |
-|----------|----------|
-| Simple (Python) | 94.50% |
-| Java | 76.00% |
-| JavaScript | 72.00% |
-| Multiple | 94.50% |
-| Parallel | 91.50% |
-| Parallel Multiple | 88.00% |
-| Irrelevance | 85.42% |
-
-**Live (AST)**
-
-| Category | Accuracy |
-|----------|----------|
-| Live Simple | 84.11% |
-| Live Multiple | 71.89% |
-| Live Parallel | 75.00% |
-| Live Parallel Multiple | 75.00% |
-| Live Irrelevance | 89.71% |
-
-**Multi-Turn**
-
-| Category | v1 | v2 | v3 | Delta v2→v3 |
-|----------|-----|-----|-----|-------------|
-| Base | 54.50% | 59.00% | **60.50%** | +1.50 |
-| Miss Function | 33.50% | 50.00% | **51.00%** | +1.00 |
-| Miss Parameter | 38.50% | 47.00% | **47.50%** | +0.50 |
-| Long Context | 53.50% | 58.50% | **56.00%** | -2.50 |
-
-v2→v3: prompt tightening helped base (+1.5%) and miss_func (+1.0%) but slightly hurt long_context (-2.5%). The ~16pt internal-vs-gorilla gap remains the primary challenge.
-
-**Agentic**
-
-| Category | Accuracy |
-|----------|----------|
-| Memory KV | 87.10% |
-| Memory Vector | 87.10% |
-| Memory Recursive Sum | 87.10% |
-| Web Search Base | 77.00% |
-| Web Search No Snippet | 82.00% |
-
-### Internal vs gorilla-verified (multi-turn, v3)
-
-| Category | Internal | Gorilla | Gap |
-|----------|----------|---------|-----|
-| Base | 71.5% | 60.5% | -11.0 |
-| Miss Function | 67.5% | 51.0% | -16.5 |
-| Miss Parameter | 70.0% | 47.5% | -22.5 |
-| Long Context | 70.5% | 56.0% | -14.5 |
-| **Average** | **69.9%** | **53.75%** | **-16.1** |
-
-The internal checker (same code as gorilla) runs in-process; gorilla re-executes all function calls independently and compares final state. The gap comes from subtle state divergence — arguments that are "close enough" to pass internal checks but produce different execution results when re-run.
-
-### Cost and latency
-
-| Metric | v1 | v2 | v3 |
-|--------|-----|-----|-----|
-| Total cost | $2.11 | $19.23 | $2.08 |
-| Mean latency | 9.39s | 19.28s | 8.52s |
-
-v2 cost was high due to auto-then-retry making 2 API calls per turn. v3 uses prompt caching aggressively, bringing cost back down to ~$2.
-
-### Pure HDC routing accuracy (internal, no gorilla state execution)
-
-These are routing-only scores — did HDC pick the right function? This does not measure argument correctness or state execution.
+Routing-only scores — did HDC pick the right function? This is constant across LLM versions since HDC routing is deterministic.
 
 | Category | Accuracy |
 |----------|----------|
@@ -134,32 +79,7 @@ These are routing-only scores — did HDC pick the right function? This does not
 | Agentic (Memory) | 91.6% |
 | **Overall** | **92.7%** |
 
-The gap between internal routing accuracy (92.7%) and gorilla-verified scores (74.50%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
-
-### Leaderboard position analysis
-
-As of 2026-03-11, Glyphh Ada 1.1 would rank **#2** on the BFCL V4 leaderboard.
-
-| Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
-|------|-------|---------|------|------------|----------|---------|---------|
-| 1 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
-| **2** | **Glyphh Ada 1.1 (HDC+FC)** | **74.50%** | **$2.08** | **53.75%** | **88.71%** | **83.30%** | **8.52s** |
-| 3 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
-| 4 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
-| 5 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
-| 6 | Grok 4.1 Fast (FC) | 69.57% | $17.26 | 58.87% | 88.27% | 68.24% | 6.74s |
-| 7 | Claude Haiku 4.5 (FC) | 68.70% | $14.23 | 53.62% | 86.50% | 68.96% | 1.68s |
-
-**Where we lead:**
-- **Cost**: $2.08 — cheapest on the board by far (next is GLM at $4.64). HDC routing is token-free.
-- **Agentic overall**: 83.30% — best on the board. Strong memory (87.1%, best on board) + solid web search.
-- **Non-Live AST**: 88.71% — top 3, competitive with Opus (88.58%) and Sonnet (88.65%).
-- **Hallucination detection**: 87.56% — top 3, ahead of Haiku standalone (85.11%).
-
-**Where we trail:**
-- **Multi-Turn**: 53.75% — improved significantly from 45% but still below Opus (68.38%) and GLM (68.00%). Closing this gap is the single biggest lever: reaching 68% multi-turn would push overall to ~79%.
-
-**The architecture insight**: HDC routing + targeted LLM arg extraction achieves #2 overall using Haiku (the cheapest Claude model) at the lowest cost on the board. The models above us use Opus/Sonnet — 5-20x more expensive per token. Our agentic score (83.30%) beats every model on the board, including Opus (79.13%), because HDC memory retrieval is deterministic and token-free.
+The gap between routing accuracy (92.7%) and gorilla-verified scores (74.50%) reflects the difference between "did we pick the right function?" and "did the full pipeline — routing, argument extraction, state management, multi-step execution — produce the correct final state?" Routing is necessary but not sufficient.
 
 ## Architecture
 
@@ -173,8 +93,8 @@ Traditional function calling asks the LLM to route, select, and extract — all 
 Build time:   LLM generates intent exemplars for each function. Once.
               Exemplars encoded into HDC vector space. Static index.
 
-Runtime:      Query → intent extraction → HDC cosine search → top match(es)
-              Top match + query → LLM arg extraction → function call
+Runtime:      Query -> intent extraction -> HDC cosine search -> top match(es)
+              Top match + query -> LLM arg extraction -> function call
 ```
 
 The LLM's generative capability is used exactly where it's strongest: creative enumeration of how humans phrase intents (build time) and flexible parameter extraction from natural language (runtime). The structured matching problem — which of 128 functions does this query map to? — is handled by deterministic vector math.
@@ -185,7 +105,7 @@ The LLM's generative capability is used exactly where it's strongest: creative e
 
 Hand-built per-domain extraction with ~800 lines of verb/target/keyword maps:
 
-- **55+ action verbs** mapped to canonical forms (e.g., "remove", "delete", "erase" → `delete`)
+- **55+ action verbs** mapped to canonical forms (e.g., "remove", "delete", "erase" -> `delete`)
 - **140+ target nouns** across 9 domains (filesystem, social, math, trading, travel, vehicle, messaging, ticket, posting)
 - **Per-class keyword detection** for API class routing in multi-turn scenarios
 - **Pack phrase matching** from Glyphh SDK intent packs for multi-word patterns
@@ -209,24 +129,26 @@ At query time, the same encoder produces a query vector. Cosine similarity again
 
 #### Stage 3: Argument extraction
 
-- **Python functions**: Claude Haiku via native Anthropic `tool_use` — the LLM sees only the matched function schema and fills parameters naturally.
+- **Python functions**: Claude via native Anthropic `tool_use` — the LLM sees only the matched function schema and fills parameters naturally.
 - **Java/JavaScript functions**: `LLMArgumentExtractor` with language-specific prompting for type conversion (Java `int` vs Python `int`, etc.).
+
+The LLM used for this stage is the variable under test — see [Haiku 4.5 results](results/v1-haiku-4.5.md) and [Opus 4.5 results](results/v2-opus-4.5.md).
 
 ### Multi-turn architecture
 
 Multi-turn entries require conversation state tracking across 3-5 turns, where each turn may involve multiple function calls.
 
 ```
-Turn query → extract_api_class() → class keyword matching
-           → per-class BFCLModelScorer → HDC function ranking
-           → filtered tools → Claude multi-step loop
-           → execute calls → feed results back → next step
+Turn query -> extract_api_class() -> class keyword matching
+           -> per-class BFCLModelScorer -> HDC function ranking
+           -> filtered tools -> Claude multi-step loop
+           -> execute calls -> feed results back -> next step
 ```
 
 Key components:
 - **MultiTurnHandler** (`multi_turn_handler.py`): Orchestrates HDC routing + CognitiveLoop state tracking
 - **CognitiveLoop**: Tracks filesystem CWD, authentication state, prerequisite actions
-- **DomainConfig** (`domain_config.py`): Per-class action→function mapping, multi-function detection keywords, exclusion rules for confusable pairs
+- **DomainConfig** (`domain_config.py`): Per-class action->function mapping, multi-function detection keywords, exclusion rules for confusable pairs
 
 The multi-step loop allows Claude to course-correct: it calls a function, sees the execution result, and decides whether to call another function or stop. This is critical for turns that require sequential operations (e.g., `cd` then `grep`).
 
@@ -254,7 +176,7 @@ No LLM involved. 87.1% accuracy on gorilla-verified memory evaluation.
 
 At build time, we mine the BFCL dataset and generate exemplars for each function:
 
-1. **Mining phase**: Extract real natural language queries from BFCL multi-turn ground truth data. Map each query to the function it invokes. Example: "search for Error in log.txt" → `GorillaFileSystem.grep`
+1. **Mining phase**: Extract real natural language queries from BFCL multi-turn ground truth data. Map each query to the function it invokes. Example: "search for Error in log.txt" -> `GorillaFileSystem.grep`
 
 2. **Exemplar generation**: Create 3 weighted BoW (bag-of-words) variants per function:
    - **Variant 1**: Differentiating words (3x emphasized) + class name — highlights what makes this function unique vs. siblings
@@ -294,18 +216,26 @@ Each class has its own:
 Our pure HDC routing hits 92.7% internally — it picks the right function. But gorilla eval measures end-to-end state correctness after execution. The gap comes from:
 
 - **Argument extraction errors**: HDC picks `grep(file_name=?, pattern=?)` correctly, but the LLM fills `pattern="error"` instead of `pattern="Error"` (case sensitivity).
-- **Multi-step sequencing**: The ground truth expects `cd("docs")` then `grep("report.txt", "budget")`. Our model might grep first (wrong CWD → wrong result).
+- **Multi-step sequencing**: The ground truth expects `cd("docs")` then `grep("report.txt", "budget")`. Our model might grep first (wrong CWD -> wrong result).
 - **State accumulation**: One wrong call in turn 1 cascades through turns 2-4.
 
 ### The empty turn problem
 
-In v1, 55% of multi-turn failures were "empty turns" — Claude responded with text instead of making tool calls. The v2 auto-then-retry approach largely solved this: try `tool_choice=auto` first, fall back to `tool_choice=any` only when Claude returns no tool calls. This preserves natural behavior while preventing empty turns. Combined with holdout turn detection, tuned system prompts, and v3's prompt tightening to eliminate extra verification calls, multi-turn improved from 45% to 53.75% gorilla-verified.
+In v1, 55% of multi-turn failures were "empty turns" — Claude responded with text instead of making tool calls. The v2 auto-then-retry approach largely solved this: try `tool_choice=auto` first, fall back to `tool_choice=any` only when Claude returns no tool calls. This preserves natural behavior while preventing empty turns. Combined with holdout turn detection, tuned system prompts, and v3's prompt tightening to eliminate extra verification calls, multi-turn improved from 45% to 53.75% gorilla-verified on Haiku.
+
+Switching to Opus 4.5 pushed multi-turn to 65.12% gorilla-verified (+11.37) — Opus produces fewer empty turns and handles multi-step sequencing more accurately. However, the ~16pt internal-vs-gorilla gap persists across both LLMs, suggesting it's structural rather than model-dependent.
 
 ### Hand-tuned intent extraction is a strength and a limitation
 
 The 800-line `intent.py` with per-domain verb/target maps is what makes routing accurate for these specific 128 functions. But it doesn't generalize. A new API class would require new mappings. This is the tradeoff: domain-specific precision vs. generic coverage.
 
 The Pipedream model takes the opposite approach — generic linguistic intent extraction that scales to 10,000+ actions. BFCL takes the targeted approach because the benchmark rewards precision on a fixed function set.
+
+### LLM as a variable
+
+By isolating the argument extraction LLM from the HDC routing layer, we can directly measure how much LLM quality affects end-to-end function calling accuracy. The HDC routing accuracy (92.7%) is constant — it's pure math. The delta between eval versions tells us exactly how much better reasoning translates to better execution.
+
+See [Haiku 4.5 results](results/v1-haiku-4.5.md) and [Opus 4.5 results](results/v2-opus-4.5.md) for the comparison.
 
 ## Quick start
 
@@ -324,6 +254,9 @@ python run_bfcl.py --all
 
 # Full V4 eval — hybrid HDC+FC (gorilla-format output)
 python run_full_eval.py --sections all
+
+# Full V4 eval with Opus
+python run_full_eval.py --sections all --model claude-opus-4-5-20251101
 
 # Specific sections
 python run_full_eval.py --sections multi_turn
@@ -347,22 +280,16 @@ bfcl/
 ├── irrelevance_model.py    # Dedicated HDC irrelevance detector (seed=53)
 ├── sidecar.py              # IrrelevanceSidecar (seed=97, validates matches)
 ├── multi_turn_handler.py   # MultiTurnHandler + CognitiveLoop
-├── llm_extractor.py        # LLMArgumentExtractor (Claude Haiku)
+├── llm_extractor.py        # LLMArgumentExtractor (Claude)
 ├── memory.py               # MemoryHandler — pure HDC memory retrieval
 ├── discover.py             # Build-time exemplar + test generation
 ├── gorilla_handler.py      # GlyphhHDCHandler — gorilla eval framework decoder
 ├── classes/                # Per-class exemplars, tests, and function defs
-│   ├── gorilla_file_system/
-│   ├── twitter_api/
-│   ├── message_api/
-│   ├── posting_api/
-│   ├── ticket_api/
-│   ├── math_api/
-│   ├── trading_bot/
-│   ├── travel_booking/
-│   └── vehicle_control/
+├── results/
+│   ├── v1-haiku-4.5.md     # Haiku 4.5 eval — detailed breakdown (v1-v3)
+│   ├── v2-opus-4.5.md      # Opus 4.5 eval — detailed breakdown
+│   └── full-eval/          # Raw result files from latest run
 ├── data/bfcl/              # Downloaded BFCL test data (gitignored)
-├── results/                # Generated results (gitignored)
 ├── archive/                # Pre-Ada archived implementation
 └── scrutiny/               # Independent review and analysis
 ```
@@ -370,8 +297,8 @@ bfcl/
 ## Dependencies
 
 - **Glyphh Runtime** (`glyphh-runtime/`): Core HDC engine — Encoder, Glyph, Vector, GQL, CognitiveLoop
-- **Anthropic API**: Claude Haiku 4.5 for argument extraction (multi-turn and single-turn)
-- **Python 3.13+**
+- **Anthropic API**: Claude for argument extraction (Haiku 4.5 or Opus 4.5)
+- **Python 3.10+**
 
 ## License
 

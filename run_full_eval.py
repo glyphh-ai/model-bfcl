@@ -66,19 +66,41 @@ from multi_turn_handler import MultiTurnHandler
 
 # ── Configuration ────────────────────────────────────────────────────────
 
-MODEL = os.environ.get("BFCL_MODEL", "claude-haiku-4-5-20251001")
+MODEL = os.environ.get("BFCL_MODEL", "claude-opus-4-5-20251101")
 DATA_DIR = _BFCL_DIR / "data" / "bfcl"
 RESULT_DIR = _BFCL_DIR / "results" / "full-eval"
 
-# Haiku 4.5 pricing
-PRICE_INPUT_PER_MTOK = 0.80
-PRICE_OUTPUT_PER_MTOK = 4.00
+# Opus 4.5 pricing
+PRICE_INPUT_PER_MTOK = 15.00
+PRICE_OUTPUT_PER_MTOK = 75.00
 
-# Thread-safe printing
+# Thread-safe printing + global run log
 _print_lock = threading.Lock()
+_run_log_path: Path | None = None
+
+def _init_run_log():
+    global _run_log_path
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    _run_log_path = RESULT_DIR / f"run_{ts}.log"
+    _log(f"=== BFCL V4 Full Evaluation ===")
+    _log(f"Model: {MODEL}")
+    _log(f"Pricing: ${PRICE_INPUT_PER_MTOK}/MTok in, ${PRICE_OUTPUT_PER_MTOK}/MTok out")
+
+def _log(msg: str):
+    line = f"[{time.strftime('%H:%M:%S')}] {msg}\n"
+    if _run_log_path:
+        with _print_lock:
+            with open(_run_log_path, "a") as f:
+                f.write(line)
+
 def safe_print(*args, **kwargs):
+    msg = " ".join(str(a) for a in args)
     with _print_lock:
-        print(*args, **kwargs, flush=True)
+        print(msg, flush=True)
+        if _run_log_path:
+            with open(_run_log_path, "a") as f:
+                f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
 
 
 # ── Data loading ─────────────────────────────────────────────────────────
@@ -566,6 +588,7 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
 
     for cat in categories:
         print(f"\n── {cat} (workers={workers}) ──")
+        _log(f"── {cat} (workers={workers}) ──")
         cr = CategoryResult(cat)
         t0 = time.time()
 
@@ -575,6 +598,7 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
             continue
 
         entries = load_jsonl(filepath)
+        _log(f"  Loaded {len(entries)} entries")
 
         # Load ground truth
         gt_by_id = {}
@@ -610,11 +634,14 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
                 done_count += 1
                 if done_count % 50 == 0 or done_count == len(entries):
                     elapsed = time.time() - t0
+                    pct = 100 * cr.correct / done_count
                     safe_print(f"  {cat}: {done_count}/{len(entries)} done, "
-                               f"{cr.correct} correct, {elapsed:.0f}s")
+                               f"{cr.correct} correct ({pct:.0f}%), {elapsed:.0f}s")
 
         elapsed = time.time() - t0
-        print(f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s")
+        summary = f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s | cost=${cr.cost:.2f}"
+        print(summary)
+        _log(summary)
         results.append(cr)
 
     return results
@@ -1710,11 +1737,15 @@ def main():
 
     sections = [s for s in args.sections if s not in args.skip]
 
+    _init_run_log()
+
     print(f"BFCL V4 Full Evaluation")
     print(f"Model: {MODEL}")
     print(f"Sections: {sections}")
     print(f"Routing workers: {args.workers}")
     print(f"Multi-turn workers: {args.mt_workers}")
+    _log(f"Sections: {sections}")
+    _log(f"Workers: routing={args.workers}, mt={args.mt_workers}, ws={args.ws_workers}")
     print(f"Web search workers: {args.ws_workers}")
 
     all_results: list[CategoryResult] = []

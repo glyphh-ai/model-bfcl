@@ -1,0 +1,16 @@
+{"id": "live_parallel_1-0-1", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 731, "output_tokens": 114, "api_calls": 1, "latency_s": 5.6936728954315186}
+{"id": "live_parallel_0-0-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 738, "output_tokens": 131, "api_calls": 1, "latency_s": 5.7532830238342285}
+{"id": "live_parallel_4-1-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 737, "output_tokens": 114, "api_calls": 1, "latency_s": 5.881210803985596}
+{"id": "live_parallel_3-0-3", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 756, "output_tokens": 199, "api_calls": 1, "latency_s": 6.220346212387085}
+{"id": "live_parallel_2-0-2", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 733, "output_tokens": 113, "api_calls": 1, "latency_s": 7.368556976318359}
+{"id": "live_parallel_5-2-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 775, "output_tokens": 117, "api_calls": 1, "latency_s": 4.738952875137329}
+{"id": "live_parallel_7-3-1", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 855, "output_tokens": 98, "api_calls": 1, "latency_s": 5.1566691398620605}
+{"id": "live_parallel_6-3-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 880, "output_tokens": 116, "api_calls": 1, "latency_s": 5.569284915924072}
+{"id": "live_parallel_9-5-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 830, "output_tokens": 163, "api_calls": 1, "latency_s": 4.67691707611084}
+{"id": "live_parallel_10-6-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 936, "output_tokens": 325, "api_calls": 1, "latency_s": 4.494460105895996}
+{"id": "live_parallel_13-9-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 724, "output_tokens": 98, "api_calls": 1, "latency_s": 2.885730028152466}
+{"id": "live_parallel_8-4-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 720, "output_tokens": 149, "api_calls": 1, "latency_s": 8.7604079246521}
+{"id": "live_parallel_11-7-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 909, "output_tokens": 352, "api_calls": 1, "latency_s": 5.39099907875061}
+{"id": "live_parallel_15-11-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 712, "output_tokens": 140, "api_calls": 1, "latency_s": 3.6931772232055664}
+{"id": "live_parallel_12-8-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 873, "output_tokens": 618, "api_calls": 1, "latency_s": 7.322187185287476}
+{"id": "live_parallel_14-10-0", "passed": false, "error": null, "decoded_calls": [], "input_tokens": 712, "output_tokens": 113, "api_calls": 1, "latency_s": 5.452714920043945}
