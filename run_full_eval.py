@@ -70,9 +70,28 @@ MODEL = os.environ.get("BFCL_MODEL", "claude-opus-4-5-20251101")
 DATA_DIR = _BFCL_DIR / "data" / "bfcl"
 RESULT_DIR = _BFCL_DIR / "results" / "full-eval"
 
-# Opus 4.5 pricing
-PRICE_INPUT_PER_MTOK = 15.00
-PRICE_OUTPUT_PER_MTOK = 75.00
+# Pricing per MTok (auto-select by model)
+_PRICING = {
+    "opus": {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.875},
+    "sonnet": {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.375},
+    "haiku": {"input": 0.80, "output": 4.00, "cache_write": 1.00, "cache_read": 0.10},
+}
+_model_tier = "haiku" if "haiku" in MODEL else "sonnet" if "sonnet" in MODEL else "opus"
+_prices = _PRICING[_model_tier]
+PRICE_INPUT_PER_MTOK = _prices["input"]
+PRICE_OUTPUT_PER_MTOK = _prices["output"]
+PRICE_CACHE_WRITE_PER_MTOK = _prices["cache_write"]
+PRICE_CACHE_READ_PER_MTOK = _prices["cache_read"]
+
+def _accum_usage(token_usage: dict, response) -> None:
+    """Accumulate token usage from an Anthropic API response, including cache metrics."""
+    usage = getattr(response, "usage", None)
+    if usage:
+        token_usage["input_tokens"] += usage.input_tokens
+        token_usage["output_tokens"] += usage.output_tokens
+        token_usage["cache_write_tokens"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
+        token_usage["cache_read_tokens"] += getattr(usage, "cache_read_input_tokens", 0) or 0
+    token_usage["api_calls"] += 1
 
 # Thread-safe printing + global run log
 _print_lock = threading.Lock()
@@ -273,6 +292,8 @@ class CategoryResult:
         self.correct = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.cache_write_tokens = 0
+        self.cache_read_tokens = 0
         self.api_calls = 0
         self.latencies: list[float] = []  # per-entry latency in seconds
         self.results: list[dict] = []  # per-entry results for export
@@ -287,7 +308,11 @@ class CategoryResult:
 
     @property
     def cost(self) -> float:
-        return (self.input_tokens / 1_000_000 * PRICE_INPUT_PER_MTOK +
+        # input_tokens from API includes cache_read; subtract to get uncached input
+        uncached_input = max(0, self.input_tokens - self.cache_read_tokens)
+        return (uncached_input / 1_000_000 * PRICE_INPUT_PER_MTOK +
+                self.cache_write_tokens / 1_000_000 * PRICE_CACHE_WRITE_PER_MTOK +
+                self.cache_read_tokens / 1_000_000 * PRICE_CACHE_READ_PER_MTOK +
                 self.output_tokens / 1_000_000 * PRICE_OUTPUT_PER_MTOK)
 
     @property
@@ -314,6 +339,8 @@ class CategoryResult:
             "accuracy": self.accuracy,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
             "total_tokens": self.total_tokens,
             "api_calls": self.api_calls,
             "cost": self.cost,
@@ -427,10 +454,10 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
 
     if not query:
         return {"id": entry_id, "correct": is_irrelevance, "latency": 0.0,
-                "tokens": {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}}
+                "tokens": {"input_tokens": 0, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0, "api_calls": 0}}
 
     t0 = time.time()
-    token_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
+    token_usage = {"input_tokens": 0, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0, "api_calls": 0}
 
     # ── HDC routing: encode functions + query, find matches ──
     scorer = BFCLModelScorer()
@@ -517,10 +544,7 @@ def _run_routing_entry(entry: dict, gt_entry: dict | None, category: str,
                 system=system, tools=tools if tools else None,
                 messages=[{"role": "user", "content": query}],
             )
-            if response.usage:
-                token_usage["input_tokens"] += response.usage.input_tokens
-                token_usage["output_tokens"] += response.usage.output_tokens
-            token_usage["api_calls"] += 1
+            _accum_usage(token_usage, response)
         except Exception as e:
             return {"id": entry_id, "correct": False, "latency": time.time() - t0,
                     "tokens": token_usage}
@@ -629,6 +653,8 @@ def run_routing_categories(categories: list[str], hybrid: bool = True,
                 tokens = r.get("tokens", {})
                 cr.input_tokens += tokens.get("input_tokens", 0)
                 cr.output_tokens += tokens.get("output_tokens", 0)
+                cr.cache_write_tokens += tokens.get("cache_write_tokens", 0)
+                cr.cache_read_tokens += tokens.get("cache_read_tokens", 0)
                 cr.api_calls += tokens.get("api_calls", 0)
 
                 done_count += 1
@@ -849,7 +875,8 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     messages = []
     all_turn_decoded = []
     all_turn_gorilla = []
-    token_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
+    token_usage = {"input_tokens": 0, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0, "api_calls": 0}
+    pattern_match_log = []  # per-turn pattern match diagnostics
     t0 = time.time()
 
     try:
@@ -907,10 +934,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     handler.record_turn(query, [])
                     continue
 
-                if hasattr(response, "usage") and response.usage:
-                    token_usage["input_tokens"] += response.usage.input_tokens
-                    token_usage["output_tokens"] += response.usage.output_tokens
-                token_usage["api_calls"] += 1
+                _accum_usage(token_usage, response)
 
                 # Record assistant text response (no tool calls)
                 assistant_content = []
@@ -926,8 +950,32 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                 handler.record_turn(query, [])
                 continue
 
-            # HDC route to get filtered tools + CWD from CognitiveLoop
-            filtered_defs, current_cwd = handler.get_filtered_tools_and_cwd(query)
+            # Pattern match diagnostic (log what pattern matcher would suggest)
+            pm_funcs, pm_conf = handler._match_pattern(query)
+            pm_entry = {
+                "turn": turn_idx,
+                "query": query[:80],
+                "pattern_funcs": pm_funcs,
+                "pattern_confidence": round(pm_conf, 4),
+                "above_threshold": pm_conf >= handler.PATTERN_CONFIDENCE_THRESHOLD,
+            }
+            pattern_match_log.append(pm_entry)
+
+            # If confident pattern match, narrow the tool set to just those functions
+            if pm_funcs is not None and pm_conf >= handler.PATTERN_CONFIDENCE_THRESHOLD:
+                # Narrow filtered tools to pattern functions only
+                pattern_set = set(pm_funcs)
+                pattern_filtered = [fd for fd in func_defs
+                                    if fd["name"].split(".")[-1] in pattern_set]
+                if pattern_filtered:
+                    filtered_defs = pattern_filtered
+                    current_cwd = handler._get_cwd()
+                else:
+                    # Pattern names don't match func_defs — fall back to HDC
+                    filtered_defs, current_cwd = handler.get_filtered_tools_and_cwd(query)
+            else:
+                # HDC route to get filtered tools + CWD from CognitiveLoop
+                filtered_defs, current_cwd = handler.get_filtered_tools_and_cwd(query)
             filtered_tools = []
             filtered_names = set()
             for fd in filtered_defs:
@@ -984,10 +1032,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     safe_print(f"    API error ({scenario_id}): {e}")
                     break
 
-                if hasattr(response, "usage") and response.usage:
-                    token_usage["input_tokens"] += response.usage.input_tokens
-                    token_usage["output_tokens"] += response.usage.output_tokens
-                token_usage["api_calls"] += 1
+                _accum_usage(token_usage, response)
 
                 tool_uses = [b for b in response.content if b.type == "tool_use"]
 
@@ -1003,10 +1048,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                         safe_print(f"    API retry error ({scenario_id}): {e}")
                         break
 
-                    if hasattr(response, "usage") and response.usage:
-                        token_usage["input_tokens"] += response.usage.input_tokens
-                        token_usage["output_tokens"] += response.usage.output_tokens
-                    token_usage["api_calls"] += 1
+                    _accum_usage(token_usage, response)
 
                     tool_uses = [b for b in response.content if b.type == "tool_use"]
 
@@ -1086,6 +1128,11 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     while len(all_turn_gorilla) < len(ground_truth):
         all_turn_gorilla.append([])
 
+    # Pattern match summary
+    pm_hits = sum(1 for pm in pattern_match_log if pm["above_threshold"])
+    pm_empty_hits = sum(1 for pm in pattern_match_log
+                        if pm["above_threshold"] and pm["pattern_funcs"] is not None and len(pm["pattern_funcs"]) == 0)
+
     return {
         "id": scenario_id,
         "passed": check_result["valid"],
@@ -1094,6 +1141,10 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
         "decoded": all_turn_decoded,
         "tokens": token_usage,
         "latency": latency,
+        "pattern_match_log": pattern_match_log,
+        "pattern_hits": pm_hits,
+        "pattern_empty_hits": pm_empty_hits,
+        "total_turns": len(queries),
     }
 
 
@@ -1146,6 +1197,8 @@ def run_multi_turn_categories(categories: list[str], workers: int = 3, max_entri
                     cr.correct += 1
                 cr.input_tokens += r["tokens"]["input_tokens"]
                 cr.output_tokens += r["tokens"]["output_tokens"]
+                cr.cache_write_tokens += r["tokens"].get("cache_write_tokens", 0)
+                cr.cache_read_tokens += r["tokens"].get("cache_read_tokens", 0)
                 cr.api_calls += r["tokens"]["api_calls"]
                 cr.latencies.append(r["latency"])
                 cr.results.append(r)
@@ -1155,15 +1208,29 @@ def run_multi_turn_categories(categories: list[str], workers: int = 3, max_entri
                 elapsed = time.time() - t0
                 status = "PASS" if r["passed"] else "FAIL"
                 pct = 100 * passed_so_far / done_count
+                pm_info = f"  pattern:{r.get('pattern_hits', 0)}/{r.get('total_turns', 0)}" if r.get("pattern_hits") else ""
                 msg = (f"  [{done_count}/{len(entries)}] {r['id']}: {status}  "
-                       f"({passed_so_far} passed, {pct:.0f}%, {elapsed:.0f}s)")
+                       f"({passed_so_far} passed, {pct:.0f}%, {elapsed:.0f}s){pm_info}")
                 safe_print(msg)
                 err_detail = f" | error: {r.get('error', '')}" if not r["passed"] and r.get("error") else ""
                 _log(f"  [{done_count}/{len(entries)}] {r['id']}: {status} "
                      f"({passed_so_far}/{done_count} = {pct:.0f}%){err_detail}")
+                # Log per-turn pattern matches
+                for pm in r.get("pattern_match_log", []):
+                    hit = "HIT" if pm["above_threshold"] else "miss"
+                    funcs = pm["pattern_funcs"]
+                    func_str = "|".join(funcs) if funcs else ("[]" if funcs is not None else "None")
+                    _log(f"    turn {pm['turn']}: {hit} conf={pm['pattern_confidence']:.3f} "
+                         f"pattern={func_str} q={pm['query']}")
 
         elapsed = time.time() - t0
-        summary_msg = f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s | cost=${cr.cost:.2f}"
+        # Aggregate pattern match stats
+        total_turns = sum(r.get("total_turns", 0) for r in cr.results)
+        total_pm_hits = sum(r.get("pattern_hits", 0) for r in cr.results)
+        total_pm_empty = sum(r.get("pattern_empty_hits", 0) for r in cr.results)
+        pm_rate = f" | pattern_hits={total_pm_hits}/{total_turns} ({100*total_pm_hits/total_turns:.0f}%)" if total_turns else ""
+        pm_empty = f" empty={total_pm_empty}" if total_pm_empty else ""
+        summary_msg = f"  {cat}: {cr.correct}/{cr.total} ({cr.accuracy:.1%}) in {elapsed:.0f}s | cost=${cr.cost:.2f}{pm_rate}{pm_empty}"
         print(summary_msg)
         _log(summary_msg)
         results.append(cr)
@@ -1325,7 +1392,7 @@ def _run_ws_entry(idx: int, entry: dict, gt_entry: dict, client: anthropic.Anthr
                 break
 
     runner = WebSearchRunner(show_snippet=show_snippet)
-    token_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
+    token_usage = {"input_tokens": 0, "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0, "api_calls": 0}
     messages = [{"role": "user", "content": question}]
     ws_system = [{"type": "text", "text": WS_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
     final_text = ""
@@ -1359,10 +1426,7 @@ def _run_ws_entry(idx: int, entry: dict, gt_entry: dict, client: anthropic.Anthr
             safe_print(f"    API error ({entry_id}): {e}")
             break
 
-        if hasattr(response, "usage") and response.usage:
-            token_usage["input_tokens"] += response.usage.input_tokens
-            token_usage["output_tokens"] += response.usage.output_tokens
-        token_usage["api_calls"] += 1
+        _accum_usage(token_usage, response)
 
         tool_uses = []
         for block in response.content:
@@ -1440,6 +1504,8 @@ def run_web_search_categories(workers: int = 5) -> list[CategoryResult]:
                     cr.correct += 1
                 cr.input_tokens += r["tokens"]["input_tokens"]
                 cr.output_tokens += r["tokens"]["output_tokens"]
+                cr.cache_write_tokens += r["tokens"].get("cache_write_tokens", 0)
+                cr.cache_read_tokens += r["tokens"].get("cache_read_tokens", 0)
                 cr.api_calls += r["tokens"]["api_calls"]
                 cr.latencies.append(r["latency"])
                 cr.results.append(r)
@@ -1499,6 +1565,8 @@ def print_final_report(all_results: list[CategoryResult]):
     # Aggregate totals
     total_input = sum(cr.input_tokens for cr in all_results)
     total_output = sum(cr.output_tokens for cr in all_results)
+    total_cache_write = sum(cr.cache_write_tokens for cr in all_results)
+    total_cache_read = sum(cr.cache_read_tokens for cr in all_results)
     total_calls = sum(cr.api_calls for cr in all_results)
     total_cost = sum(cr.cost for cr in all_results)
     all_latencies = []
@@ -1571,6 +1639,8 @@ def print_final_report(all_results: list[CategoryResult]):
     print(f"\n  TOTAL TOKEN USAGE:")
     print(f"    Input tokens:  {total_input:>12,}")
     print(f"    Output tokens: {total_output:>12,}")
+    print(f"    Cache write:   {total_cache_write:>12,}")
+    print(f"    Cache read:    {total_cache_read:>12,}")
     print(f"    Total tokens:  {total_input + total_output:>12,}")
     print(f"    API calls:     {total_calls:>12,}")
     print(f"    Total cost:    ${total_cost:>11.4f}")

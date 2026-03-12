@@ -73,6 +73,41 @@ def _load_func_defs(class_dir: str) -> list[dict]:
     return func_defs
 
 
+def _load_turn_pattern_exemplars() -> list[dict]:
+    """Load turn_patterns exemplars.jsonl as 'function defs' for encoding."""
+    path = _CLASSES_DIR / "turn_patterns" / "exemplars.jsonl"
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _encode_and_store(cur, class_dir: str, encoder, encode_fn, items: list[dict],
+                      name_fn=None):
+    """Encode items and store in pgvector."""
+    count = 0
+    for item in items:
+        concept_dict = encode_fn(item)
+        glyph = encoder.encode(
+            Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
+        )
+
+        cortex_list = glyph.global_cortex.data.tolist()
+        while len(cortex_list) < 2000:
+            cortex_list.append(0)
+
+        glyph_bytes = pickle.dumps(glyph)
+        func_name = name_fn(item) if name_fn else item["name"]
+
+        cur.execute(
+            """INSERT INTO function_glyphs (class_dir, func_name, cortex, glyph_pickle)
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (class_dir, func_name) DO UPDATE
+               SET cortex = EXCLUDED.cortex, glyph_pickle = EXCLUDED.glyph_pickle""",
+            (class_dir, func_name, str(cortex_list), glyph_bytes),
+        )
+        count += 1
+    return count
+
+
 def main():
     conn = psycopg2.connect(DB_DSN)
     conn.autocommit = True
@@ -93,40 +128,25 @@ def main():
         encoder_mod = _load_class_module(class_dir, "encoder")
         config = encoder_mod.ENCODER_CONFIG
         encode_fn = encoder_mod.encode_function
-
         encoder = Encoder(config)
 
-        func_defs = _load_func_defs(class_dir)
-        count = 0
-        for fd in func_defs:
-            concept_dict = encode_fn(fd)
-            glyph = encoder.encode(
-                Concept(name=concept_dict["name"], attributes=concept_dict["attributes"])
+        if class_dir == "turn_patterns":
+            # Turn patterns: encode exemplars (not func_doc files)
+            exemplars = _load_turn_pattern_exemplars()
+            count = _encode_and_store(
+                cur, class_dir, encoder, encode_fn, exemplars,
+                name_fn=lambda ex: f"{ex['function_name']}__v{ex['variant']}",
             )
+        else:
+            func_defs = _load_func_defs(class_dir)
+            count = _encode_and_store(cur, class_dir, encoder, encode_fn, func_defs)
 
-            # Cortex vector as list for pgvector
-            cortex_list = glyph.global_cortex.data.tolist()
-            # Pad to 2000 if needed
-            while len(cortex_list) < 2000:
-                cortex_list.append(0)
-
-            glyph_bytes = pickle.dumps(glyph)
-
-            cur.execute(
-                """INSERT INTO function_glyphs (class_dir, func_name, cortex, glyph_pickle)
-                   VALUES (%s, %s, %s, %s)
-                   ON CONFLICT (class_dir, func_name) DO UPDATE
-                   SET cortex = EXCLUDED.cortex, glyph_pickle = EXCLUDED.glyph_pickle""",
-                (class_dir, fd["name"], str(cortex_list), glyph_bytes),
-            )
-            count += 1
-
-        print(f"  {class_dir}: {count} functions")
+        print(f"  {class_dir}: {count} glyphs")
         total += count
 
     cur.close()
     conn.close()
-    print(f"\nLoaded {total} function glyphs into pgvector.")
+    print(f"\nLoaded {total} glyphs into pgvector.")
 
 
 if __name__ == "__main__":

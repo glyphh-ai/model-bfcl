@@ -1,0 +1,33 @@
+{
+  "model": "claude-opus-4-5-20251101",
+  "timestamp": "2026-03-12 06:20:02",
+  "categories": {
+    "multi_turn_long_context": {
+      "category": "multi_turn_long_context",
+      "total": 20,
+      "correct": 19,
+      "accuracy": 0.95,
+      "input_tokens": 281028,
+      "output_tokens": 14754,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "total_tokens": 295782,
+      "api_calls": 181,
+      "cost": 5.32197,
+      "latency_mean_s": 28.642391443252563,
+      "latency_sd_s": 18.00598290682014,
+      "latency_p95_s": 51.60618710517883
+    }
+  },
+  "v4_scores": {
+    "non_live": null,
+    "hallucination": null,
+    "live": null,
+    "multi_turn": 0.95,
+    "memory_summary": null,
+    "web_search_summary": null,
+    "agentic": null,
+    "overall": 0.95,
+    "weight_covered": 0.3
+  }
+}

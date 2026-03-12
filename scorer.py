@@ -41,6 +41,7 @@ _CLASS_DIR_MAP = {
     "TradingBot": "trading_bot",
     "TravelAPI": "travel_booking",
     "VehicleControlAPI": "vehicle_control",
+    "TurnPattern": "turn_patterns",
 }
 
 # Reverse: directory name → class prefix

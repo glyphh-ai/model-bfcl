@@ -136,10 +136,19 @@ def _build_initial_state(initial_config: dict, class_name: str) -> dict | None:
 # -- Handler ---------------------------------------------------------------
 
 class MultiTurnHandler:
-    """HDC routing + CognitiveLoop state + LLM arg extraction."""
+    """HDC routing + pattern matching + CognitiveLoop state + LLM arg extraction.
+
+    Two-stage routing:
+      Stage 1 (new): Pattern scorer matches query → known function sequence.
+                     If high confidence, LLM only extracts args (no function picking).
+      Stage 2 (fallback): Per-class HDC routing + LLM picks from candidates.
+    """
+
+    PATTERN_CONFIDENCE_THRESHOLD = 0.45  # above this, trust pattern match
 
     def __init__(self):
         self._scorers: dict[str, BFCLModelScorer] = {}
+        self._pattern_scorer: BFCLModelScorer | None = None
         self._loops: dict[str, CognitiveLoop] = {}
         self._llm = LLMArgumentExtractor()
         self._func_defs: dict[str, dict] = {}  # func_name -> func_def
@@ -155,6 +164,14 @@ class MultiTurnHandler:
 
         self._involved_classes = entry.get("involved_classes", [])
         self._initial_config = entry.get("initial_config", {})
+
+        # Load pattern scorer from pgvector (shared across entries)
+        if self._pattern_scorer is None:
+            try:
+                self._pattern_scorer = BFCLModelScorer()
+                self._pattern_scorer.configure_from_db("turn_patterns")
+            except Exception:
+                self._pattern_scorer = None
 
         # Index func defs
         for fd in func_defs:
@@ -199,6 +216,45 @@ class MultiTurnHandler:
             class_name = fd["name"].split(".")[0] if "." in fd["name"] else ""
             self._class_func_defs.setdefault(class_name, []).append(fd)
 
+    def _match_pattern(self, query: str) -> tuple[list[str] | None, float]:
+        """Match query against known turn patterns via HDC.
+
+        Returns:
+            (function_names, confidence) where function_names is the ordered
+            list of bare function names from the matched pattern, or None if
+            no confident match. confidence is the best pattern score.
+        """
+        if not self._pattern_scorer:
+            return None, 0.0
+
+        result = self._pattern_scorer.score(query)
+        if not result.all_scores:
+            return None, 0.0
+
+        # Group by pattern (strip __vN suffix), take max score per pattern
+        pattern_scores: dict[str, float] = {}
+        for entry in result.all_scores:
+            full_key = entry["function"]
+            pattern_key = full_key.rsplit("__v", 1)[0]
+            score = entry["score"]
+            if pattern_key not in pattern_scores or score > pattern_scores[pattern_key]:
+                pattern_scores[pattern_key] = score
+
+        ranked = sorted(pattern_scores.items(), key=lambda x: -x[1])
+        if not ranked:
+            return None, 0.0
+
+        # Find best non-empty pattern (skip "[]" — holdout detection handles no-call turns)
+        for pattern, score in ranked:
+            if pattern == "[]":
+                continue
+            if score < self.PATTERN_CONFIDENCE_THRESHOLD:
+                return None, score
+            func_names = pattern.split("|")
+            return func_names, score
+
+        return None, 0.0
+
     def _detect_keyword_functions(self, query: str, class_name: str) -> list[str]:
         """Detect functions implied by keywords in the query using DomainConfig."""
         domain_config = CLASS_DOMAIN_CONFIGS.get(class_name)
@@ -223,14 +279,19 @@ class MultiTurnHandler:
             - raw_calls: [{"cd": {"folder": "document"}}, {"mkdir": {"dir_name": "temp"}}]
 
         Pipeline:
+          0. Pattern match -> if high confidence, predetermined function sequence
           1. HDC scoring per class -> Level 1 class filtering
           2. HDC top-N + keyword detection -> candidate functions
           3. CognitiveLoop state -> CWD context
-          4. LLM picks from candidates + extracts args (route_and_extract_turn)
+          4a. (pattern hit) LLM extracts args only for known functions
+          4b. (fallback) LLM picks from candidates + extracts args
           5. CognitiveLoop apply_state -> update CWD
           6. Format as call strings
         """
-        # Step 1: HDC route per class
+        # Step 0: Pattern matching — try to match query to a known pattern
+        pattern_funcs, pattern_confidence = self._match_pattern(query)
+
+        # Step 1: HDC route per class (needed for both paths)
         class_scores: dict[str, list[tuple[str, float]]] = {}
         for class_name in self._involved_classes:
             scorer = self._scorers.get(class_name)
@@ -257,23 +318,34 @@ class MultiTurnHandler:
         relevant_classes = [cn for cn, ms in class_max.items()
                            if ms >= best_score - 0.15]
 
-        # Step 2: Build candidate list -- HDC top-N + keyword-detected functions
-        candidate_funcs: list[str] = []
-        seen: set[str] = set()
+        # Step 2: Build candidate function list
+        if pattern_funcs is not None:
+            # Pattern hit: use the predetermined function sequence
+            # Resolve bare names to class-prefixed names from available func_defs
+            candidate_funcs = []
+            for bare in pattern_funcs:
+                for full_name, fd in self._func_defs.items():
+                    if _strip_class_prefix(full_name) == bare:
+                        candidate_funcs.append(full_name)
+                        break
+        else:
+            # Fallback: HDC top-N + keyword detection
+            candidate_funcs = []
+            seen: set[str] = set()
 
-        for class_name in relevant_classes:
-            kw_funcs = self._detect_keyword_functions(query, class_name)
-            for fn in kw_funcs:
-                bare = _strip_class_prefix(fn)
-                if bare not in seen:
-                    seen.add(bare)
-                    candidate_funcs.append(fn)
+            for class_name in relevant_classes:
+                kw_funcs = self._detect_keyword_functions(query, class_name)
+                for fn in kw_funcs:
+                    bare = _strip_class_prefix(fn)
+                    if bare not in seen:
+                        seen.add(bare)
+                        candidate_funcs.append(fn)
 
-            for fn, sim in class_scores.get(class_name, []):
-                bare = _strip_class_prefix(fn)
-                if bare not in seen:
-                    seen.add(bare)
-                    candidate_funcs.append(fn)
+                for fn, sim in class_scores.get(class_name, []):
+                    bare = _strip_class_prefix(fn)
+                    if bare not in seen:
+                        seen.add(bare)
+                        candidate_funcs.append(fn)
 
         if not candidate_funcs:
             self._history.append(query)
@@ -290,14 +362,14 @@ class MultiTurnHandler:
                     current_cwd = primary
                     break
 
-        # Step 4: Build func_defs for the LLM (only the candidates)
+        # Step 4: Build func_defs for the LLM
         candidate_fdefs = []
         for fn in candidate_funcs:
             fd = self._func_defs.get(fn)
             if fd:
                 candidate_fdefs.append(fd)
 
-        # Step 5: LLM picks from candidates + extracts args
+        # Step 5: LLM extracts args (pattern hit) or picks + extracts (fallback)
         if candidate_fdefs and query:
             calls = self._llm.route_and_extract_turn(
                 query=query,
