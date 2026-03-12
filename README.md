@@ -35,7 +35,7 @@ All scores are gorilla-verified (state execution checker), not internal routing 
 | Multi-Turn | 30% | 53.75% | **65.12%** | +11.37 |
 | Agentic | 40% | 83.30% | **87.55%** | +4.25 |
 | **Overall** | **100%** | **74.50%** | **79.92%** | **+5.42** |
-| **Cost** | | $2.08 | ~$50 | |
+| **Cost** | | $2.08 | $2.11 | |
 | **Latency** | | 8.52s | 13.16s | |
 
 Detailed breakdowns, subcategory scores, and version history for each eval are in the linked results files.
@@ -46,7 +46,7 @@ As of 2026-03-11, Glyphh Ada 1.1 would rank **#1** on the BFCL V4 leaderboard.
 
 | Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
 |------|-------|---------|------|------------|----------|---------|---------|
-| **1** | **Glyphh Ada 1.1 (HDC+FC)** | **79.92%** | **~$50** | **65.12%** | **90.56%** | **87.55%** | **13.16s** |
+| **1** | **Glyphh Ada 1.1 (HDC+FC)** | **79.92%** | **$2.11** | **65.12%** | **90.56%** | **87.55%** | **13.16s** |
 | 2 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
 | 3 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
 | 4 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
