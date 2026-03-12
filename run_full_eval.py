@@ -869,8 +869,8 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     handler = MultiTurnHandler()
     handler.setup(entry, func_defs)
 
-    # Build system prompt with state context (category-specific)
-    system_prompt = _build_mt_system_prompt(initial_config, category=category)
+    # BASELINE: no system prompt — matches Gorilla's ClaudeHandler behavior
+    system_prompt = ""
 
     messages = []
     all_turn_decoded = []
@@ -950,7 +950,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                 handler.record_turn(query, [])
                 continue
 
-            # Pattern match diagnostic (log what pattern matcher would suggest)
+            # Pattern match: get exact function sequence for this turn
             pm_funcs, pm_conf = handler._match_pattern(query)
             pm_entry = {
                 "turn": turn_idx,
@@ -961,21 +961,19 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
             }
             pattern_match_log.append(pm_entry)
 
-            # If confident pattern match, narrow the tool set to just those functions
+            # If pattern confident, narrow tools to pattern functions only
+            # Claude still does multi-round tool_use (not single-shot)
             if pm_funcs is not None and pm_conf >= handler.PATTERN_CONFIDENCE_THRESHOLD:
-                # Narrow filtered tools to pattern functions only
                 pattern_set = set(pm_funcs)
                 pattern_filtered = [fd for fd in func_defs
                                     if fd["name"].split(".")[-1] in pattern_set]
                 if pattern_filtered:
                     filtered_defs = pattern_filtered
-                    current_cwd = handler._get_cwd()
                 else:
-                    # Pattern names don't match func_defs — fall back to HDC
-                    filtered_defs, current_cwd = handler.get_filtered_tools_and_cwd(query)
+                    filtered_defs = func_defs
             else:
-                # HDC route to get filtered tools + CWD from CognitiveLoop
-                filtered_defs, current_cwd = handler.get_filtered_tools_and_cwd(query)
+                filtered_defs = func_defs
+
             filtered_tools = []
             filtered_names = set()
             for fd in filtered_defs:
@@ -984,16 +982,8 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     filtered_tools.append(tool)
                     filtered_names.add(tool["name"])
 
-            # Fallback to all tools if filtering produced nothing
-            if not filtered_tools:
-                for fd in func_defs:
-                    tool = _to_anthropic_tool(fd)
-                    if tool["name"] not in filtered_names:
-                        filtered_tools.append(tool)
-                        filtered_names.add(tool["name"])
-
-            # System prompt: cache the static instruction block
-            turn_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+            # System prompt: cache the static instruction block (skip if empty for baseline)
+            turn_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}] if system_prompt else []
 
             # Tools: cache the last tool definition (covers entire tools block)
             if filtered_tools:
@@ -1002,106 +992,219 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     t.pop("cache_control", None)
                 filtered_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
+            # Always use native tool_use — pattern match only narrows the tool set
+            use_single_shot = False
+
             messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
 
             turn_steps = []
             turn_gorilla_steps = []
             turn_raw_calls = []
-            step = 0
 
-            while step < MAX_STEPS_PER_TURN:
-                # Cache last two user messages to avoid re-processing growing context
-                _user_count = 0
-                for _m in reversed(messages):
-                    if _m["role"] == "user" and isinstance(_m["content"], list):
-                        if _user_count < 2:
-                            _m["content"][-1]["cache_control"] = {"type": "ephemeral"}
-                        else:
-                            for _c in _m["content"]:
-                                _c.pop("cache_control", None)
-                        _user_count += 1
+            if use_single_shot:
+                # Build schema descriptions for HDC-picked functions
+                func_schemas = []
+                for bare in hdc_func_names:
+                    for fd in func_defs:
+                        if fd["name"].split(".")[-1] == bare:
+                            params = fd.get("parameters", {})
+                            props = params.get("properties", {})
+                            required = params.get("required", [])
+                            param_descs = []
+                            for pname, pinfo in props.items():
+                                ptype = pinfo.get("type", "string")
+                                pdesc = pinfo.get("description", "")
+                                req = " (REQUIRED)" if pname in required else ""
+                                param_descs.append(f"    - {pname}: {ptype}{req} — {pdesc}")
+                            func_schemas.append(f"  {bare}:\n" + "\n".join(param_descs) if param_descs else f"  {bare}: (no parameters)")
+                            break
+
+                schema_block = "\n".join(func_schemas)
+                seq = " → ".join(hdc_func_names)
+
+                extraction_prompt = (
+                    f"Extract function arguments from the user's request.\n\n"
+                    f"Functions available (call the ones needed): {seq}\n\n"
+                    f"Parameter schemas:\n{schema_block}\n\n"
+                    f"Conversation context so far:\n"
+                )
+                # Add prior conversation as context
+                for msg in messages[:-1]:  # exclude current query (already in prompt)
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        texts = [c.get("text", c.get("content", "")) for c in content if isinstance(c, dict)]
+                        content = " ".join(t for t in texts if t)
+                    if content:
+                        extraction_prompt += f"  [{role}]: {content[:300]}\n"
+
+                extraction_prompt += (
+                    f"\nCurrent request: {query}\n\n"
+                    f"Return ONLY a JSON array of objects, one per function call, in order.\n"
+                    f"Each object: {{\"function\": \"name\", \"arguments\": {{...}}}}\n"
+                    f"Rules:\n"
+                    f"- ALWAYS return the JSON array. NEVER refuse, explain, or say you cannot. Your ONLY job is argument extraction.\n"
+                    f"- Use EXACT values from the request/context. Do NOT paraphrase or embellish.\n"
+                    f"- Use IDs (not names) for receiver_id and similar fields when IDs exist in context.\n"
+                    f"- Include all required parameters. Include optional params only when specified.\n"
+                    f"- For content/message params, use the EXACT text from the request, not a summary.\n"
+                    f"- If a parameter value is ambiguous, use your best guess from context. Never skip a call.\n"
+                    f"- Return raw JSON only, no markdown, no explanation, no commentary."
+                )
 
                 try:
-                    # Auto-then-retry: try auto first, fall back to any if empty
                     response = client.messages.create(
-                        model=MODEL, temperature=0.0, max_tokens=8192,
-                        system=turn_system, tools=filtered_tools, messages=messages,
-                        tool_choice={"type": "auto"},
+                        model=MODEL, temperature=0.0, max_tokens=4096,
+                        system=turn_system,
+                        messages=[{"role": "user", "content": extraction_prompt}],
                     )
                 except Exception as e:
                     safe_print(f"    API error ({scenario_id}): {e}")
-                    break
+                    all_turn_decoded.append([])
+                    all_turn_gorilla.append([])
+                    handler.record_turn(query, [])
+                    continue
 
                 _accum_usage(token_usage, response)
 
-                tool_uses = [b for b in response.content if b.type == "tool_use"]
+                # Parse JSON response
+                resp_text = "".join(b.text for b in response.content if b.type == "text")
+                # Strip markdown fences if present
+                resp_text = resp_text.strip()
+                if resp_text.startswith("```"):
+                    resp_text = resp_text.split("\n", 1)[-1]
+                if resp_text.endswith("```"):
+                    resp_text = resp_text.rsplit("```", 1)[0]
+                resp_text = resp_text.strip()
 
-                # If step 0 returned no tool calls, retry with forced tool_choice
-                if step == 0 and not tool_uses:
+                try:
+                    calls = json.loads(resp_text)
+                except json.JSONDecodeError:
+                    safe_print(f"    JSON parse error ({scenario_id}): {resp_text[:100]}")
+                    calls = []
+
+                if isinstance(calls, dict):
+                    calls = [calls]
+
+                call_strings = []
+                gorilla_step = []
+                step_raw_calls = []
+                for call in calls:
+                    fname = call.get("function", "")
+                    args = call.get("arguments", {})
+                    arg_parts = [f"{k}={repr(v)}" for k, v in args.items()]
+                    call_strings.append(f"{fname}({', '.join(arg_parts)})")
+                    gorilla_step.append({fname: json.dumps(args)})
+                    step_raw_calls.append({fname: args})
+
+                if call_strings:
+                    turn_steps.append(call_strings)
+                    turn_gorilla_steps.append(gorilla_step)
+                    turn_raw_calls.extend(step_raw_calls)
+                    handler.update_state(step_raw_calls)
+
+                    # Execute to update state for subsequent turns
+                    execution_results, _ = execute_multi_turn_func_call(
+                        call_strings, initial_config, involved_classes,
+                        f"full_eval_{scenario_id}", scenario_id,
+                    )
+
+                    # Record execution in messages for context in future turns
+                    assistant_content = [{"type": "text", "text": f"Called: {'; '.join(call_strings)}"}]
+                    messages.append({"role": "assistant", "content": assistant_content})
+                    exec_summary = "; ".join(str(r)[:200] for r in execution_results)
+                    messages.append({"role": "user", "content": [{"type": "text", "text": f"Results: {exec_summary}"}]})
+
+            else:
+                # ── Fallback: standard tool_use loop (no pattern match) ──
+                step = 0
+                while step < MAX_STEPS_PER_TURN:
+                    _user_count = 0
+                    for _m in reversed(messages):
+                        if _m["role"] == "user" and isinstance(_m["content"], list):
+                            if _user_count < 2:
+                                _m["content"][-1]["cache_control"] = {"type": "ephemeral"}
+                            else:
+                                for _c in _m["content"]:
+                                    _c.pop("cache_control", None)
+                            _user_count += 1
+
                     try:
                         response = client.messages.create(
                             model=MODEL, temperature=0.0, max_tokens=8192,
                             system=turn_system, tools=filtered_tools, messages=messages,
-                            tool_choice={"type": "any"},
+                            tool_choice={"type": "auto"},
                         )
                     except Exception as e:
-                        safe_print(f"    API retry error ({scenario_id}): {e}")
+                        safe_print(f"    API error ({scenario_id}): {e}")
                         break
 
                     _accum_usage(token_usage, response)
 
                     tool_uses = [b for b in response.content if b.type == "tool_use"]
 
-                assistant_content = []
-                for block in response.content:
-                    if block.type == "text" and block.text:
-                        assistant_content.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
-                        assistant_content.append({
-                            "type": "tool_use", "id": block.id,
-                            "name": block.name, "input": block.input,
-                        })
-                if not assistant_content:
-                    assistant_content.append({"type": "text", "text": "I'll help with that."})
-                messages.append({"role": "assistant", "content": assistant_content})
+                    if step == 0 and not tool_uses:
+                        try:
+                            response = client.messages.create(
+                                model=MODEL, temperature=0.0, max_tokens=8192,
+                                system=turn_system, tools=filtered_tools, messages=messages,
+                                tool_choice={"type": "any"},
+                            )
+                        except Exception as e:
+                            safe_print(f"    API retry error ({scenario_id}): {e}")
+                            break
 
-                if not tool_uses:
-                    break
+                        _accum_usage(token_usage, response)
+                        tool_uses = [b for b in response.content if b.type == "tool_use"]
 
-                call_strings = []
-                gorilla_step = []
-                step_raw_calls = []
-                for tu in tool_uses:
-                    arg_parts = [f"{k}={repr(v)}" for k, v in tu.input.items()]
-                    call_strings.append(f"{tu.name}({', '.join(arg_parts)})")
-                    gorilla_step.append({tu.name: json.dumps(tu.input)})
-                    step_raw_calls.append({tu.name: tu.input})
+                    assistant_content = []
+                    for block in response.content:
+                        if block.type == "text" and block.text:
+                            assistant_content.append({"type": "text", "text": block.text})
+                        elif block.type == "tool_use":
+                            assistant_content.append({
+                                "type": "tool_use", "id": block.id,
+                                "name": block.name, "input": block.input,
+                            })
+                    if not assistant_content:
+                        assistant_content.append({"type": "text", "text": "I'll help with that."})
+                    messages.append({"role": "assistant", "content": assistant_content})
 
-                turn_steps.append(call_strings)
-                turn_gorilla_steps.append(gorilla_step)
-                turn_raw_calls.extend(step_raw_calls)
+                    if not tool_uses:
+                        break
 
-                # Update CognitiveLoop state from this step's calls
-                handler.update_state(step_raw_calls)
+                    call_strings = []
+                    gorilla_step = []
+                    step_raw_calls = []
+                    for tu in tool_uses:
+                        arg_parts = [f"{k}={repr(v)}" for k, v in tu.input.items()]
+                        call_strings.append(f"{tu.name}({', '.join(arg_parts)})")
+                        gorilla_step.append({tu.name: json.dumps(tu.input)})
+                        step_raw_calls.append({tu.name: tu.input})
 
-                # Execute and feed results back to Claude
-                execution_results, _ = execute_multi_turn_func_call(
-                    call_strings, initial_config, involved_classes,
-                    f"full_eval_{scenario_id}", scenario_id,
-                )
+                    turn_steps.append(call_strings)
+                    turn_gorilla_steps.append(gorilla_step)
+                    turn_raw_calls.extend(step_raw_calls)
 
-                tool_results_content = []
-                for tu, result in zip(tool_uses, execution_results):
-                    result_str = str(result)
-                    tr = {"type": "tool_result", "tool_use_id": tu.id, "content": result_str}
-                    if result_str.startswith("Error during execution:"):
-                        tr["is_error"] = True
-                    tool_results_content.append(tr)
-                messages.append({"role": "user", "content": tool_results_content})
+                    handler.update_state(step_raw_calls)
 
-                step += 1
-                if response.stop_reason == "end_turn":
-                    break
+                    execution_results, _ = execute_multi_turn_func_call(
+                        call_strings, initial_config, involved_classes,
+                        f"full_eval_{scenario_id}", scenario_id,
+                    )
+
+                    tool_results_content = []
+                    for tu, result in zip(tool_uses, execution_results):
+                        result_str = str(result)
+                        tr = {"type": "tool_result", "tool_use_id": tu.id, "content": result_str}
+                        if result_str.startswith("Error during execution:"):
+                            tr["is_error"] = True
+                        tool_results_content.append(tr)
+                    messages.append({"role": "user", "content": tool_results_content})
+
+                    step += 1
+                    if response.stop_reason == "end_turn":
+                        break
 
             all_turn_decoded.append(turn_steps)
             all_turn_gorilla.append(turn_gorilla_steps)
@@ -1131,7 +1234,7 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     # Pattern match summary
     pm_hits = sum(1 for pm in pattern_match_log if pm["above_threshold"])
     pm_empty_hits = sum(1 for pm in pattern_match_log
-                        if pm["above_threshold"] and pm["pattern_funcs"] is not None and len(pm["pattern_funcs"]) == 0)
+                        if pm["above_threshold"] and pm.get("pattern_funcs") is not None and len(pm["pattern_funcs"]) == 0)
 
     return {
         "id": scenario_id,
@@ -1218,9 +1321,10 @@ def run_multi_turn_categories(categories: list[str], workers: int = 3, max_entri
                 # Log per-turn pattern matches
                 for pm in r.get("pattern_match_log", []):
                     hit = "HIT" if pm["above_threshold"] else "miss"
-                    funcs = pm["pattern_funcs"]
-                    func_str = "|".join(funcs) if funcs else ("[]" if funcs is not None else "None")
-                    _log(f"    turn {pm['turn']}: {hit} conf={pm['pattern_confidence']:.3f} "
+                    funcs = pm.get("pattern_funcs")
+                    func_str = "|".join(funcs) if funcs else "None"
+                    conf = pm.get("pattern_confidence", 0.0)
+                    _log(f"    turn {pm['turn']}: {hit} conf={conf:.3f} "
                          f"pattern={func_str} q={pm['query']}")
 
         elapsed = time.time() - t0
