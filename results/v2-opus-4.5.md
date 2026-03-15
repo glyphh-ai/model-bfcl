@@ -91,7 +91,7 @@ Memory is pure HDC (unchanged). Web search improved from 79.50% to 88.00% — Op
 
 | Metric | Haiku 4.5 (v3) | Opus 4.5 |
 |--------|----------------|----------|
-| Total cost | $2.08 | $205.97 |
+| Total cost | $2.08 | $63.86 |
 | Mean latency | 8.52s | 13.16s |
 | Latency P95 | 23.17s | 49.58s |
 
@@ -106,7 +106,7 @@ Result: confirmed. Multi-turn jumped from 53.75% to 65.12% gorilla-verified (+11
 ## What's different from Haiku 4.5
 
 - **LLM**: Opus 4.5 replaces Haiku 4.5 for argument extraction
-- **Cost**: $205.97 actual (Opus $15/$75 per MTok, with prompt caching) vs Haiku $2.08
+- **Cost**: $63.86 actual (Opus $15/$75 per MTok, with prompt caching) vs Haiku $2.08
 - **Multi-turn**: +11.37 points — Opus handles complex multi-step scenarios far better
 - **Web search**: +8.50 points — better search result parsing
 - **Irrelevance**: -2.14 points on non-live (85.42% vs 87.56%) — Opus over-engages with irrelevant queries
