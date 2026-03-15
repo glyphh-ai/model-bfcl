@@ -193,9 +193,11 @@ def run_entry(entry, gt_entry, category, mode="glyphh"):
                 messages=messages,
             )
             if mode == "glyphh" and pm_funcs is not None:
-                # Force tool calls until all pattern tools have been called at least once
+                # Force tool calls until all pattern tools have been called,
+                # but only if SlotExtractor confirms all args are extractable
                 called_so_far = set(k for raw in turn_raw_calls for k in raw.keys())
-                if not set(pm_funcs).issubset(called_so_far):
+                uncalled = [f for f in pm_funcs if f not in called_so_far]
+                if uncalled and handler.can_force_tools(query, uncalled):
                     api_kwargs["tool_choice"] = {"type": "any"}
             response = client.messages.create(**api_kwargs)
             total_input += response.usage.input_tokens

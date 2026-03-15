@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from glyphh import CognitiveLoop
+from glyphh.cognitive.slots import SlotExtractor
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -618,6 +619,64 @@ class MultiTurnHandler:
                 loop.apply_state(prefixed_calls)
             except Exception:
                 pass
+
+    def can_force_tools(self, query: str, uncalled_funcs: list[str]) -> bool:
+        """Check if SlotExtractor can fill all required params for uncalled tools.
+
+        Uses the existing DomainConfig slot_definitions to determine whether
+        forcing tool_choice: any is safe (all args extractable from query + state)
+        or risky (would produce <UNKNOWN> args).
+
+        Args:
+            query: Current turn query text
+            uncalled_funcs: Bare function names that haven't been called yet
+
+        Returns:
+            True if all required params can be filled (safe to force),
+            False if any required params are missing (use auto instead).
+        """
+        if not uncalled_funcs:
+            return True
+
+        for class_name in self._involved_classes:
+            loop = self._loops.get(class_name)
+            domain_config = CLASS_DOMAIN_CONFIGS.get(class_name)
+            if not loop or not domain_config:
+                continue
+
+            # No slot definitions means we can't check — don't force
+            if not domain_config.slot_definitions:
+                continue
+
+            extractor = SlotExtractor(domain_config)
+
+            # Build state from CognitiveLoop
+            state = dict(loop._state) if hasattr(loop, '_state') else {}
+
+            # Build func_schemas for the uncalled functions in this class
+            func_schemas = {}
+            funcs_to_check = []
+            for bare_name in uncalled_funcs:
+                full_name = f"{class_name}.{bare_name}"
+                fd = self._func_defs.get(full_name)
+                if fd:
+                    func_schemas[full_name] = fd
+                    funcs_to_check.append(full_name)
+
+            if not funcs_to_check:
+                continue
+
+            # Extract what we can from query + state
+            filled = extractor.extract(
+                query, funcs_to_check, func_schemas, state, claim_aware=True,
+            )
+
+            # Check for missing required params
+            missing = extractor.missing_required(funcs_to_check, func_schemas, filled)
+            if missing:
+                return False
+
+        return True
 
     def get_turn_context(self, query: str) -> str:
         """Build a concise context string for the LLM with CWD + HDC scores.

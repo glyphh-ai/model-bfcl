@@ -55,7 +55,10 @@ from bfcl_eval.eval_checker.multi_turn_eval.multi_turn_checker import (
     multi_turn_checker,
 )
 from bfcl_eval.eval_checker.agentic_eval.agentic_checker import agentic_checker
-from bfcl_eval.model_handler.utils import convert_to_function_call as gorilla_convert_to_function_call
+try:
+    from bfcl_eval.model_handler.utils import convert_to_function_call as gorilla_convert_to_function_call
+except ImportError:
+    gorilla_convert_to_function_call = None
 
 # Local imports
 from scorer import BFCLModelScorer, _CLASS_DIR_MAP
@@ -1137,11 +1140,13 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                                     _c.pop("cache_control", None)
                             _user_count += 1
 
-                    # Determine tool_choice: force calls until pattern is satisfied
+                    # Determine tool_choice: force calls until pattern is satisfied,
+                    # but only if SlotExtractor confirms all required args are extractable.
                     tc = {"type": "auto"}
                     if pm_funcs is not None and pm_conf >= handler.PATTERN_CONFIDENCE_THRESHOLD:
                         called_so_far = set(k for raw in turn_raw_calls for k in raw.keys())
-                        if not set(pm_funcs).issubset(called_so_far):
+                        uncalled = [f for f in pm_funcs if f not in called_so_far]
+                        if uncalled and handler.can_force_tools(query, uncalled):
                             tc = {"type": "any"}
 
                     try:
@@ -1920,6 +1925,8 @@ def main():
                        help="Multi-turn parallel workers (default 3)")
     parser.add_argument("--ws-workers", type=int, default=5,
                        help="Web search parallel workers (default 5)")
+    parser.add_argument("--max-entries", type=int, default=0,
+                       help="Limit entries per category (0 = all)")
     parser.add_argument("--no-hybrid", action="store_true",
                        help="Disable LLM hybrid extraction for routing categories")
     args = parser.parse_args()
