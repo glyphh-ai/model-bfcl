@@ -17,6 +17,89 @@ from glyphh import DomainConfig
 
 FS_DOMAIN_CONFIG = DomainConfig.from_dict({
     "domain": "gorilla_filesystem",
+    "slot_definitions": {
+        # Navigation target — match against known subdirs, then quoted (skip filenames)
+        "folder": {
+            "type": "entity",
+            "strategies": ["state_match:locations_here", "quoted_filtered:items_here", "fallback_words"],
+            "fallback_words": {"parent": "..", "back": "..", "up": ".."},
+        },
+        # Directory name for mkdir/rmdir — usually a new name, so quoted (skip existing files)
+        "dir_name": {
+            "type": "text",
+            "strategies": ["quoted_filtered:items_here"],
+        },
+        # File name — match against known files in CWD, then quoted (skip dir names), then implicit
+        "file_name": {
+            "type": "entity",
+            "strategies": ["state_match:items_here", "quoted_filtered:locations_here", "implicit_single:items_here"],
+        },
+        # Diff: first file
+        "file_name1": {
+            "type": "entity",
+            "strategies": ["quoted:0", "state_match:items_here"],
+        },
+        # Diff: second file
+        "file_name2": {
+            "type": "entity",
+            "strategies": ["quoted:1"],
+        },
+        # Move/copy source — before transfer word, or match against files
+        "source": {
+            "type": "entity",
+            "strategies": ["positional_before_transfer", "state_match:items_here", "quoted:0"],
+        },
+        # Move/copy destination — after transfer word, or match against dirs
+        "destination": {
+            "type": "entity",
+            "strategies": ["positional_after_transfer", "state_match:locations_here", "quoted:1"],
+        },
+        # Echo content — quoted string (usually the longest one)
+        "content": {
+            "type": "text",
+            "strategies": ["quoted:0"],
+        },
+        # Grep pattern — quoted string
+        "pattern": {
+            "type": "text",
+            "strategies": ["quoted"],
+        },
+        # Find name — quoted string
+        "name": {
+            "type": "text",
+            "strategies": ["quoted"],
+        },
+        # Find path — usually "." (current dir)
+        "path": {
+            "type": "text",
+            "strategies": ["fallback_words", "quoted"],
+            "fallback_words": {"current": ".", "here": ".", "this": "."},
+        },
+        # Tail/head line count
+        "lines": {
+            "type": "number",
+            "strategies": ["number"],
+        },
+        # ls -a flag
+        "a": {
+            "type": "boolean",
+            "strategies": ["bool_triggers"],
+            "triggers": {"all": True, "hidden": True, "-a": True, "including": True},
+        },
+        # du human-readable flag
+        "human_readable": {
+            "type": "boolean",
+            "strategies": ["bool_triggers"],
+            "triggers": {"human": True, "readable": True, "human-readable": True},
+        },
+        # wc mode
+        "mode": {
+            "type": "enum",
+            "strategies": ["keyword_map"],
+            "keyword_map": {"words": "w", "word": "w", "lines": "l", "line": "l",
+                            "characters": "c", "character": "c", "chars": "c"},
+        },
+    },
     "action_to_func": {
         "list":        "GorillaFileSystem.ls",
         "navigate":    "GorillaFileSystem.cd",

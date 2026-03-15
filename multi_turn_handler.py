@@ -619,6 +619,53 @@ class MultiTurnHandler:
             except Exception:
                 pass
 
+    def get_turn_context(self, query: str) -> str:
+        """Build a concise context string for the LLM with CWD + HDC scores.
+
+        Returns a short prompt fragment that tells the LLM:
+          - Current working directory
+          - Files and dirs visible at CWD
+          - HDC-ranked function suggestions with confidence scores
+        """
+        # CWD + collections from CognitiveLoop state
+        cwd = self._get_cwd()
+        items_here = []
+        locations_here = []
+        for class_name in self._involved_classes:
+            loop = self._loops.get(class_name)
+            if loop and hasattr(loop, '_state'):
+                collections = loop._state.get("collections", {})
+                items_here = collections.get("items_here", [])
+                locations_here = collections.get("locations_here", [])
+                break
+
+        lines = [f"CWD: /{cwd}"]
+        if items_here:
+            lines.append(f"Files: {', '.join(items_here[:15])}")
+        if locations_here:
+            lines.append(f"Dirs: {', '.join(locations_here[:15])}")
+
+        # HDC routing scores
+        for class_name in self._involved_classes:
+            scorer = self._scorers.get(class_name)
+            if not scorer:
+                continue
+            result = scorer.score(query)
+            if not result.all_scores:
+                continue
+            top = [(s["function"], s["score"]) for s in result.all_scores[:5]
+                   if s["score"] > 0.10]
+            if top:
+                score_parts = [f"{_strip_class_prefix(fn)} ({score:.2f})" for fn, score in top]
+                lines.append(f"Routing: {', '.join(score_parts)}")
+
+        # Pattern match
+        pm_funcs, pm_conf = self._match_pattern(query)
+        if pm_funcs and pm_conf >= self.PATTERN_CONFIDENCE_THRESHOLD:
+            lines.append(f"Pattern: {' → '.join(pm_funcs)} ({pm_conf:.2f})")
+
+        return "\n".join(lines)
+
     def record_turn(self, query: str, raw_calls: list[dict]) -> None:
         """Record turn in history (for conversation context in subsequent turns)."""
         self._history.append(query)

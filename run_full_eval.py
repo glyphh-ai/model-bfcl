@@ -869,8 +869,9 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
     handler = MultiTurnHandler()
     handler.setup(entry, func_defs)
 
-    # BASELINE: no system prompt — matches Gorilla's ClaudeHandler behavior
-    system_prompt = ""
+    # GUIDED: per-turn dynamic context with CWD + HDC scores
+    # Set to "" to disable and revert to baseline (no system prompt)
+    use_guided_context = False
 
     messages = []
     all_turn_decoded = []
@@ -982,8 +983,12 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     filtered_tools.append(tool)
                     filtered_names.add(tool["name"])
 
-            # System prompt: cache the static instruction block (skip if empty for baseline)
-            turn_system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}] if system_prompt else []
+            # System prompt: dynamic per-turn context with CWD + HDC scores
+            if use_guided_context:
+                turn_ctx = handler.get_turn_context(query)
+                turn_system = [{"type": "text", "text": turn_ctx, "cache_control": {"type": "ephemeral"}}] if turn_ctx else []
+            else:
+                turn_system = []
 
             # Tools: cache the last tool definition (covers entire tools block)
             if filtered_tools:
@@ -1116,7 +1121,10 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                     messages.append({"role": "user", "content": [{"type": "text", "text": f"Results: {exec_summary}"}]})
 
             else:
-                # ── Fallback: standard tool_use loop (no pattern match) ──
+                # ── Native tool_use loop ──
+                # If pattern matched, force tool_choice: any until all pattern
+                # tools have been called at least once (prevents Claude from
+                # stopping early or refusing to act without exploring first).
                 step = 0
                 while step < MAX_STEPS_PER_TURN:
                     _user_count = 0
@@ -1129,11 +1137,18 @@ def _run_mt_entry(entry: dict, gt_entry: dict, client: anthropic.Anthropic,
                                     _c.pop("cache_control", None)
                             _user_count += 1
 
+                    # Determine tool_choice: force calls until pattern is satisfied
+                    tc = {"type": "auto"}
+                    if pm_funcs is not None and pm_conf >= handler.PATTERN_CONFIDENCE_THRESHOLD:
+                        called_so_far = set(k for raw in turn_raw_calls for k in raw.keys())
+                        if not set(pm_funcs).issubset(called_so_far):
+                            tc = {"type": "any"}
+
                     try:
                         response = client.messages.create(
                             model=MODEL, temperature=0.0, max_tokens=8192,
                             system=turn_system, tools=filtered_tools, messages=messages,
-                            tool_choice={"type": "auto"},
+                            tool_choice=tc,
                         )
                     except Exception as e:
                         safe_print(f"    API error ({scenario_id}): {e}")
@@ -1939,7 +1954,7 @@ def main():
 
     # 2. Multi-Turn (LLM execution loop)
     if "multi_turn" in sections:
-        results = run_multi_turn_categories(V4_MULTI_TURN_CATS, workers=args.mt_workers)
+        results = run_multi_turn_categories(V4_MULTI_TURN_CATS, workers=args.mt_workers, max_entries=args.max_entries)
         all_results.extend(results)
         print(f"\n  >> Flushing multi-turn results to disk...")
         export_all_results(all_results)
