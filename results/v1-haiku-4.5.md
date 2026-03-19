@@ -95,10 +95,10 @@ The internal checker runs in-process; gorilla re-executes all function calls ind
 
 | Metric | v1 | v2 | v3 |
 |--------|-----|-----|-----|
-| Total cost | $2.11 | $19.23 | $2.08 |
+| Total cost | $2.11 | $19.23 | $18.64 |
 | Mean latency | 9.39s | 19.28s | 8.52s |
 
-v2 cost was high due to auto-then-retry making 2 API calls per turn. v3 uses prompt caching aggressively, bringing cost back down to ~$2.
+v2 cost was high due to auto-then-retry making 2 API calls per turn. v3 uses prompt caching aggressively.
 
 ## Pure HDC Routing Accuracy (internal, no gorilla state execution)
 

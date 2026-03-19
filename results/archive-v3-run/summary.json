@@ -42,7 +42,7 @@
       "rec_sum": "87.10%"
     }
   },
-  "cost": "$2.08",
+  "cost": "$18.64",
   "latency_mean_s": 8.52,
   "weights": {
     "non_live": 0.10,

@@ -35,7 +35,7 @@ All scores are gorilla-verified (state execution checker), not internal routing 
 | Multi-Turn | 30% | 53.75% | **65.12%** | +11.37 |
 | Agentic | 40% | 83.30% | **87.55%** | +4.25 |
 | **Overall** | **100%** | **74.50%** | **79.92%** | **+5.42** |
-| **Cost** | | $2.08 | $63.86 | |
+| **Cost** | | $18.64 | $63.86 | |
 | **Latency** | | 8.52s | 13.16s | |
 
 Detailed breakdowns, subcategory scores, and version history for each eval are in the linked results files.
@@ -46,16 +46,17 @@ As of 2026-03-11, Glyphh Ada 1.1 would rank **#1** on the BFCL V4 leaderboard.
 
 | Rank | Model | Overall | Cost | Multi-Turn | Non-Live | Agentic | Latency |
 |------|-------|---------|------|------------|----------|---------|---------|
-| **1** | **Glyphh Ada 1.1 (HDC+FC)** | **79.92%** | **$63.86** | **65.12%** | **90.56%** | **87.55%** | **13.16s** |
+| **1** | **Glyphh Ada 1.1 — Opus (HDC+FC)** | **79.92%** | **$63.86** | **65.12%** | **90.56%** | **87.55%** | **13.16s** |
 | 2 | Claude Opus 4.5 (FC) | 77.47% | $86.55 | 68.38% | 88.58% | 79.13% | 4.38s |
-| 3 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
-| 4 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
-| 5 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
-| 6 | Grok 4.1 Fast (FC) | 69.57% | $17.26 | 58.87% | 88.27% | 68.24% | 6.74s |
-| 7 | Claude Haiku 4.5 (FC) | 68.70% | $14.23 | 53.62% | 86.50% | 68.96% | 1.68s |
+| **3** | **Glyphh Ada 1.1 — Haiku (HDC+FC)** | **74.50%** | **$18.64** | **53.75%** | **88.71%** | **83.30%** | **8.52s** |
+| 4 | Claude Sonnet 4.5 (FC) | 73.24% | $43.73 | 61.37% | 88.65% | 72.98% | 4.31s |
+| 5 | Gemini 3 Pro (Prompt) | 72.51% | $298.47 | 60.75% | 90.65% | 70.86% | 12.08s |
+| 6 | GLM-4.6 (FC thinking) | 72.38% | $4.64 | 68.00% | 87.56% | 66.60% | 4.34s |
+| 7 | Grok 4.1 Fast (FC) | 69.57% | $17.26 | 58.87% | 88.27% | 68.24% | 6.74s |
+| 8 | Claude Haiku 4.5 (FC) | 68.70% | $14.23 | 53.62% | 86.50% | 68.96% | 1.68s |
 
 **Where we lead:**
-- **Overall**: 79.92% — #1 on the board, 2.45 points ahead of Opus standalone (77.47%).
+- **Overall**: 79.92% (Opus) — #1 on the board, 2.45 points ahead of Opus standalone (77.47%). 74.50% (Haiku) — #3.
 - **Agentic**: 87.55% — best on the board. Strong memory (87.1%, best on board) + web search (88.0%).
 - **Non-Live AST**: 90.56% — best on the board, ahead of Opus standalone (88.58%).
 - **Hallucination detection**: 87.56% — top 3, ahead of Haiku standalone (85.11%).
@@ -64,7 +65,7 @@ As of 2026-03-11, Glyphh Ada 1.1 would rank **#1** on the BFCL V4 leaderboard.
 - **Multi-Turn**: 65.12% — improved +11.37 from Haiku but still below Opus standalone (68.38%) and GLM (68.00%). A ~16pt internal-vs-gorilla gap persists across both LLMs, suggesting structural execution state divergence rather than model quality.
 - **Latency**: 13.16s mean — slower than pure LLM approaches due to multi-stage pipeline.
 
-**The architecture insight**: HDC routing + Opus arg extraction achieves #1 overall. The same HDC layer with Haiku ($2.08) scores 74.50% — still #4 on the board at the lowest cost. Swapping only the LLM (no HDC changes) added +5.42 points, confirming that HDC routing and LLM arg extraction are independently tunable. Our agentic score (87.55%) beats every model on the board, including Opus standalone (79.13%), because HDC memory retrieval is deterministic and token-free.
+**The architecture insight**: HDC routing + Opus arg extraction achieves #1 overall. The same HDC layer with Haiku ($18.64) scores 74.50% — still #3 on the board. Swapping only the LLM (no HDC changes) added +5.42 points, confirming that HDC routing and LLM arg extraction are independently tunable. Our agentic score (87.55%) beats every model on the board, including Opus standalone (79.13%), because HDC memory retrieval is deterministic and token-free.
 
 ### Pure HDC routing accuracy
 
